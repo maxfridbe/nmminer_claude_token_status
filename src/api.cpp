@@ -234,6 +234,7 @@ static bool parseUsage(const String &body, int acct, Account &a, String &err) {
 
   memcpy(a.buckets, out, sizeof(Bucket) * n);
   a.nBuckets = n;
+  a.weekResetsAt = haveWeekly ? weekly.resets : 0;
   return true;
 }
 
@@ -606,6 +607,7 @@ void apiCheckAll() {
     demoBucket(a, "Opus", fminf(71 - i * 20 + step * 4, 100), week, i != 2);
     if (i >= 1) demoBucket(a, "Fable",  fminf(9 + i * 30 + step * 2, 100), week + 86400, false);
     if (i == 2) demoBucket(a, "Sonnet", fminf(44 + step * 3, 100), week, false);
+    a.weekResetsAt = week;
     a.ok = a.everOk = true;
     a.error[0] = 0;
     a.fetchedAt = time(nullptr);

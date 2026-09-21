@@ -10,6 +10,9 @@ Claude in the browser), or from a Linux machine with a config file and a script.
 ![claude-status running on a Cheap Yellow Display](screenshots/claude-monitor.jpg)
 
 - **Ring**: the 5-hour session window, % used, with time until reset.
+- **Week bar**: a thin grey bar under the reset time showing how much of the
+  weekly window has passed, with the time left. Read a model's % against it:
+  75% used with half the week gone means you're ahead of pace.
 - **Meters**: the models you choose per account. A model with no limit of its
   own draws on the all-models weekly limit; that's the number shown, tagged
   `shared`.

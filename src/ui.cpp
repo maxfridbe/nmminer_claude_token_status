@@ -28,9 +28,10 @@ extern TFT_eSPI tft;
 #define RING_IR  34
 #define RING_A0  30     // TFT_eSPI arcs: 0 deg at 6 o'clock, clockwise
 #define RING_A1  330
-#define RESET_Y  156
-#define ROW_Y0   174
-#define ROW_H    32
+#define RESET_Y  154
+#define WEEK_Y   168              // thin week-progress bar under the reset line
+#define ROW_Y0   178
+#define ROW_H    31
 #define MAX_ROWS 2
 #define BAR_H    9                // odd, so the round caps center on a pixel
 
@@ -241,6 +242,29 @@ static void drawResetLine(TFT_eSPI &g, int cx, int y, int maxW, const Account &a
   g.drawString(rs, x + w1, y);
 }
 
+// How far into the weekly window we are, so a meter's % can be read against
+// the time that's gone. Neutral grey: it measures time, not usage.
+static void drawWeekBar(TFT_eSPI &g, int x0, int x1, int y, const Account &a) {
+  if (!a.everOk || !a.weekResetsAt) return;
+  const long WEEK = 7L * 86400L;
+  long left = (long)(a.weekResetsAt - time(nullptr));
+  left = constrain(left, 0L, WEEK);
+
+  char txt[20];
+  if (left >= 86400) snprintf(txt, sizeof(txt), "%ldd %ldh left", left / 86400, (left % 86400) / 3600);
+  else               snprintf(txt, sizeof(txt), "%ldh %02ldm left", left / 3600, (left % 3600) / 60);
+  g.setTextFont(1);
+  g.setTextColor(C_DIM);
+  g.setTextDatum(MR_DATUM);
+  g.drawString(txt, x1, y + 1);
+
+  int w = x1 - x0 - g.textWidth(txt) - 6;
+  if (w < 20) return;
+  g.fillRoundRect(x0, y, w, 3, 1, C_TRACK);
+  int fw = (int)(w * (float)(WEEK - left) / WEEK + 0.5f);
+  if (fw > 0) g.fillRoundRect(x0, y, max(fw, 3), 3, 1, C_DIM);
+}
+
 static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
   const int cx = ox + COL_W / 2;
   const bool stale = !a.ok && a.everOk;
@@ -252,6 +276,7 @@ static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
   drawHeader(g, ox, a, COL_W);
   drawRing(g, cx, RING_CY, RING_R, RING_IR, s, stale, &FreeSansBold18pt7b, 17);
   drawResetLine(g, cx, RESET_Y, COL_W - PAD * 2, a, s);
+  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, WEEK_Y, a);
 
   int first = s ? 1 : 0;
   int no = a.everOk ? a.nBuckets - first : 0;
@@ -275,7 +300,8 @@ static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
 #define WIDE_RING_CY 124
 #define WIDE_RING_R  60
 #define WIDE_RING_IR 46
-#define WIDE_RESET_Y 208
+#define WIDE_RESET_Y 204
+#define WIDE_WEEK_Y  220
 #define WIDE_ROW_Y0  26
 #define WIDE_ROW_H   50
 #define WIDE_ROWS    4
@@ -288,6 +314,7 @@ static void drawWideLeft(TFT_eSPI &g, int ox, const Account &a) {
   drawHeader(g, ox, a, COL_W);
   drawRing(g, ox + COL_W / 2, WIDE_RING_CY, WIDE_RING_R, WIDE_RING_IR, s, stale, &FreeSansBold24pt7b, 26);
   drawResetLine(g, ox + COL_W / 2, WIDE_RESET_Y, COL_W - PAD, a, s);
+  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, WIDE_WEEK_Y, a);
 }
 
 static void drawWideRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale) {

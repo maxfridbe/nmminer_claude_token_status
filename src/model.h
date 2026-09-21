@@ -25,6 +25,7 @@ struct Account {
   bool   everOk;      // buckets hold real data from some earlier check
   char   error[48];
   time_t fetchedAt;
+  time_t weekResetsAt;   // end of the all-models weekly window, 0 if unknown
 };
 
 enum NetStatus { NET_IDLE, NET_CHECKING, NET_OK, NET_PARTIAL, NET_FAILED };
