@@ -267,7 +267,10 @@ deploy, run `tools/scope_test.py <alias>`.
 
 GitHub Actions builds the generic firmware for every `v*` tag and attaches
 `claude-status.bin` and its checksum to a release. It also checks that the
-image embeds no credentials. To cut one: `git tag v1.2.3 && git push origin v1.2.3`.
+image embeds no credentials. Versions are `vYY.MM.NN`: year, month, and the
+release number within that month. To cut one:
+
+    git tag v26.09.02 && git push origin v26.09.02
 
 ## Caveats
 
