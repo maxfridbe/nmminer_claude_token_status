@@ -53,6 +53,7 @@ void   apiSyncAccounts();                                        // settings -> 
 bool   apiWifiUp();                                              // join the configured WiFi
 String apiSigninStart(const char *alias, const char *models);   // returns the claude.ai link
 bool   apiSigninFinish(String pasted, String &err, String &email);
+bool   apiSigninPending(String &alias, String &url);
 
 // ui.cpp
 void   uiInit();
@@ -60,7 +61,19 @@ void   uiSplash(const char* status);
 void   uiDrawAll();
 void   uiDrawStatus();
 void   uiSetupScreen(const char *apSsid, const char *apPass, const char *url);
-void   uiShowPin(const char *pin);   // overlay until uiHidePin(), redrawn by uiDrawAll()
+// Overlays sit on top of the dashboard and survive its redraws.
+enum OverlayKind { OV_NONE, OV_PIN, OV_HOTSPOT, OV_MENU };
+void   uiShowPin(const char *pin);
 void   uiHidePin();
+void   uiShowHotspot(const char *ssid, const char *pass, const char *url);
+void   uiHideHotspot();
+void   uiShowMenu();
+void   uiCloseOverlay();
+int    uiOverlay();
+int    uiMenuHit(int x, int y);       // menu row at a touch point, or -1
+bool   uiSetupButtonHit(int x, int y); // "Use this screen" on the setup screen
+
+// main.cpp: one calibrated touch sample, false when not pressed
+bool   touchRead(int &x, int &y);
 bool   uiScroll(int delta);   // with 3+ accounts: +1 right, -1 left; true if it moved
 bool   uiNextPage();          // with 3+ accounts: advance one page, wrapping around

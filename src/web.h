@@ -1,17 +1,24 @@
-// The setup website: a WPA2 hotspot with a captive portal on first boot, and
-// (with hosting enabled, or while no account is set up) a page on the LAN for
-// adding accounts via Claude's copy-paste sign-in. Changes on the LAN need a
-// PIN that the display shows on request.
+// The setup website, reachable two ways:
+//  - the board's own WPA2 hotspot: on first boot (with a captive portal), on
+//    demand after a long press, and whenever no account exists. Its password
+//    changes each time and appears only on screen, so hotspot clients are
+//    trusted. This is the route that works on guest networks, which isolate
+//    clients from each other.
+//  - the LAN, with hosting enabled. Changes there need a PIN that the display
+//    shows on request.
 #pragma once
 #include <Arduino.h>
 
 void   webStartSetupAP();
 void   webStartLan();
+void   webStartHotspot();        // alongside the WiFi connection, until idle
+bool   webHotspotUp();
 void   webLoop();
 bool   webActive();
 bool   webSetupMode();
 const char *webApSsid();
 const char *webApPass();
-String webUrl();          // "http://<ip>", or "" when not serving
+String webUrl();          // LAN address when hosting there, else the hotspot's
+String webHotspotUrl();
 
 extern bool webWantsCheck;   // an account was added or removed

@@ -393,13 +393,15 @@ void apiCheckAll() {
 // approves on claude.ai, which then shows a code to paste back here.
 struct Pending {
   bool     active;
+  String   url;
   char     alias[24];
   char     models[48];
   char     verifier[64];
   char     state[64];
   uint32_t startedMs;
 };
-static Pending pending = {};
+static Pending pending;
+static void clearPending() { pending = Pending(); }
 
 static void base64url(const uint8_t *in, size_t n, char *out) {
   static const char A[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -430,7 +432,7 @@ static String urlEncode(const char *s) {
 }
 
 String apiSigninStart(const char *alias, const char *models) {
-  pending = {};
+  clearPending();
   pending.active = true;
   strlcpy(pending.alias, alias, sizeof(pending.alias));
   strlcpy(pending.models, models, sizeof(pending.models));
@@ -443,10 +445,20 @@ String apiSigninStart(const char *alias, const char *models) {
   char challenge[48];
   base64url(digest, 32, challenge);
 
-  return String(AUTHORIZE_URL) + "?code=true&client_id=" + CLIENT_ID +
-         "&response_type=code&redirect_uri=" + urlEncode(REDIRECT_URL) +
-         "&scope=" + urlEncode(cfg.refreshScope) + "&code_challenge=" + challenge +
-         "&code_challenge_method=S256&state=" + pending.state;
+  pending.url = String(AUTHORIZE_URL) + "?code=true&client_id=" + CLIENT_ID +
+                "&response_type=code&redirect_uri=" + urlEncode(REDIRECT_URL) +
+                "&scope=" + urlEncode(cfg.refreshScope) + "&code_challenge=" + challenge +
+                "&code_challenge_method=S256&state=" + pending.state;
+  return pending.url;
+}
+
+// A sign-in in progress, so the page can pick it up again after the phone
+// left the hotspot to reach claude.ai.
+bool apiSigninPending(String &alias, String &url) {
+  if (!pending.active || millis() - pending.startedMs > 15UL * 60UL * 1000UL) return false;
+  alias = pending.alias;
+  url = pending.url;
+  return true;
 }
 
 // "claude_max" + "default_claude_max_5x" -> "MAX 5x"
@@ -525,7 +537,7 @@ bool apiSigninFinish(String pasted, String &err, String &email) {
   }
   settingsSave();
   apiSyncAccounts();
-  pending = {};
+  clearPending();
   email = a.email;
   Serial.printf("[signin] %s signed in as %s (%s)\n", a.alias, a.email, a.plan);
   return true;
@@ -575,6 +587,7 @@ void apiPollLink() {}
 void apiSyncAccounts() {}
 bool apiWifiUp() { return false; }
 String apiSigninStart(const char *, const char *) { return ""; }
+bool apiSigninPending(String &, String &) { return false; }
 bool apiSigninFinish(String, String &err, String &) { err = "Demo mode"; return false; }
 
 void apiCheckAll() {

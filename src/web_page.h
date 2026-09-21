@@ -67,6 +67,7 @@ function render() {
   let body;
   if (S.mode === 'setup') body = [wifiCard(true)];
   else if (!S.authed) body = [pinCard()];
+  else if (S.pending) { app.replaceChildren(...head); showSignin(S.pending.alias, S.pending.url, true); return; }
   else body = [accountsCard(), addCard(), deviceCard()];
   app.replaceChildren(...head, ...body.filter(Boolean));
   clearTimeout(timer);
@@ -98,8 +99,9 @@ function wifiCard(setup) {
     try {
       await api('/api/wifi', {ssid: ssid.value, password: pass.value, hostname: host.value, hosting: hosting.checked});
       c.replaceChildren(el('h2', {text: 'Restarting...'}),
-        el('p', {text: 'The display is joining ' + ssid.value + '. Reconnect this phone to ' + ssid.value +
-          ', then open the address shown on the display to add your Claude accounts.'}));
+        el('p', {text: 'The display is joining ' + ssid.value + '. Any accounts already on it are kept.'}),
+        el('p', {class: 'muted', text: 'To add accounts, scan the new code on the display to join its ' +
+          'hotspot again (its password changes on every restart), or press and hold the display for the menu.'}));
     } catch (e) { note(c, e.message, true); save.disabled = false; }
   }});
   c.append(scan, nets, el('label', {text: 'Network'}), ssid, el('label', {text: 'Password'}), pass,
@@ -160,14 +162,33 @@ function addCard() {
 async function signin(host, alias, models) {
   let r;
   try { r = await api('/api/signin/start', {alias, models}); } catch (e) { note(host, e.message, true); return; }
+  showSignin(alias, r.url, false);
+}
+
+// Browsers only allow the clipboard API on HTTPS, so fall back to selecting
+// the link in a box and copying that.
+function copyText(input, host) {
+  input.focus(); input.select(); input.setSelectionRange(0, 99999);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  note(host, ok ? 'Link copied.' : 'Select the link above and copy it.', !ok);
+}
+
+function showSignin(alias, url, resumed) {
   clearTimeout(timer);
   const code = el('input', {placeholder: 'Paste the code here', autocapitalize: 'off', autocorrect: 'off'});
+  const link = el('input', {value: url, readonly: 'readonly'});
   const box = el('div', {class: 'card'},
-    el('h2', {text: 'Sign in: ' + alias}),
+    el('h2', {text: (resumed ? 'Finish signing in: ' : 'Sign in: ') + alias}),
     el('div', {class: 'step', text: '1. Approve on claude.ai'}),
     el('p', {class: 'muted', text: 'Sign in as the account you want shown as "' + alias +
-      '". If this browser is signed in to a different Claude account, open the link in a private window.'}),
-    el('a', {class: 'btn', href: r.url, target: '_blank', rel: 'noopener', text: 'Open claude.ai'}),
+      '". If this browser is signed in to a different Claude account, use a private window.'}),
+    el('a', {class: 'btn', href: url, target: '_blank', rel: 'noopener', text: 'Open claude.ai'}));
+  box.append(
+    el('p', {class: 'muted', text: "If claude.ai won't load, your phone is sending everything through the " +
+      "board's hotspot, which has no internet. Copy the link, switch back to your usual network, open it " +
+      'there and approve, copy the code it shows, then rejoin the hotspot and reopen this page. It picks up here.'}),
+    link, el('button', {class: 'alt', text: 'Copy link', onclick: () => copyText(link, box)}),
     el('div', {class: 'step', text: '2. Paste the code it shows'}), code);
   const finish = el('button', {text: 'Finish', onclick: async () => {
     finish.disabled = true;
@@ -178,14 +199,17 @@ async function signin(host, alias, models) {
       setTimeout(load, 6000);
     } catch (e) { note(box, e.message, true); finish.disabled = false; }
   }});
-  box.append(finish, el('button', {class: 'alt', text: 'Cancel', onclick: load}));
-  app.replaceChildren(app.firstChild, app.children[1], box);
+  box.append(finish, el('button', {class: 'alt', text: 'Cancel', onclick: () => { S.pending = null; render(); }}));
+  app.replaceChildren(app.children[0], app.children[1], box);
   window.scrollTo(0, 0);
 }
 
 function deviceCard() {
-  const c = el('div', {class: 'card'}, el('h2', {text: 'Device'}),
-    el('p', {class: 'muted', text: 'Address: ' + S.url + '  or  ' + S.mdns}));
+  const where = S.via === 'hotspot'
+    ? "Connected through the board's hotspot (" + S.hotspot + '). It turns off after 15 idle minutes.'
+    : 'Address: ' + S.url + '  or  ' + S.mdns;
+  const c = el('div', {class: 'card'}, el('h2', {text: 'Device'}), el('p', {class: 'muted', text: where}),
+    el('p', {class: 'muted', text: 'Press and hold the display for its menu: this page, change WiFi, restart.'}));
   const num = (v, min, max) => el('input', {type: 'number', min: String(min), max: String(max), value: v});
   const refresh = num(S.refreshMinutes, 1, 240), bright = num(S.brightness, 5, 100);
   const sleep = num(S.sleepMinutes, 0, 1440), dim = num(S.dimMinutes, 0, 120);

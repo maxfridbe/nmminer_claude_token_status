@@ -12,6 +12,7 @@
 #include "model.h"
 #include "settings.h"
 #include "web.h"
+#include "wifi_screen.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <TFT_eSPI.h>
@@ -25,6 +26,9 @@
 #define XPT2046_IRQ  36
 #define TS_MINX      200     // raw extents, landscape
 #define TS_MAXX      3700
+#define TS_MINY      240
+#define TS_MAXY      3800
+#define LONG_PRESS_MS 1500   // hold this long for the menu
 #define Z_MIN        280     // real presses on this panel read 400+
 #define SWIPE_PX     40      // horizontal travel that counts as a swipe
 #define EDGE_PX      60      // taps this close to either side scroll too
@@ -138,37 +142,86 @@ static String statsSignature() {
 
 // ---------------------------------------------------------------- touch
 
-static bool touching = false;
-static int  startX, lastX, releaseCount;
+static bool touching = false, longFired = false;
+static int  startX, startY, lastX, lastY, releaseCount;
+static uint32_t pressStart;
 
 // The IRQ line only drops under real pressure, so it gates every read.
-static bool touchX(int &x) {
+bool touchRead(int &x, int &y) {
   if (digitalRead(XPT2046_IRQ) == HIGH || !ts.touched()) return false;
   TS_Point p = ts.getPoint();
   if (p.z < Z_MIN) return false;
   x = constrain(map(p.x, TS_MINX, TS_MAXX, 0, 320), 0, 319);
+  y = constrain(map(p.y, TS_MINY, TS_MAXY, 0, 240), 0, 239);
   return true;
 }
 
-// Acts on release: a swipe scrolls toward where the finger came from, a tap
-// near either edge scrolls that way.
+static void menuAction(int item) {
+  Serial.printf("[menu] %d\n", item);
+  switch (item) {
+    case 0:   // phone setup page, over the board's own hotspot
+      webStartHotspot();
+      uiShowHotspot(webApSsid(), webApPass(), webHotspotUrl().c_str());
+      break;
+    case 1:   // WiFi on the touchscreen; accounts and logins untouched
+      if (screenWifiSetup()) {
+        uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
+        delay(900);
+        ESP.restart();
+      }
+      uiCloseOverlay();
+      break;
+    case 2:   // WiFi from a phone, on the setup hotspot at next boot
+      settingsRequestSetup();
+      uiSplash("Restarting into WiFi setup...");
+      delay(700);
+      ESP.restart();
+      break;
+    case 3:
+      uiSplash("Restarting...");
+      delay(400);
+      ESP.restart();
+      break;
+    case 4:
+      uiCloseOverlay();
+      break;
+  }
+}
+
+// Hold for the menu. On release: a tap works the menu or closes an overlay,
+// a swipe scrolls toward where the finger came from, and a tap near either
+// edge scrolls that way.
 static void pollTouch() {
-  int x;
-  if (touchX(x)) {
-    if (!touching) { touching = true; startX = x; }
-    lastX = x;
+  int x, y;
+  if (touchRead(x, y)) {
+    if (!touching) { touching = true; longFired = false; startX = x; startY = y; pressStart = millis(); }
+    lastX = x; lastY = y;
     releaseCount = 0;
+    if (!longFired && millis() - pressStart >= LONG_PRESS_MS &&
+        abs(lastX - startX) < 30 && abs(lastY - startY) < 30) {
+      longFired = true;
+      wake("touch");
+      Serial.println("[touch] menu");
+      uiShowMenu();
+    }
     return;
   }
   if (!touching || ++releaseCount < 3) return;
   touching = false;
+  if (longFired) return;                     // the hold already opened the menu
   if (screen != SCREEN_ON) { wake("touch"); return; }
   lastActivity = millis();
 
+  switch (uiOverlay()) {
+    case OV_MENU:    { int i = uiMenuHit(lastX, lastY); if (i >= 0) menuAction(i); return; }
+    case OV_HOTSPOT: uiCloseOverlay(); return;
+    case OV_PIN:     return;
+  }
+
   int dx = lastX - startX, step = 0;
-  if (dx <= -SWIPE_PX)           step = +1;
-  else if (dx >= SWIPE_PX)       step = -1;
-  else if (lastX < EDGE_PX)      step = -1;
+  if (dx <= -SWIPE_PX)            step = +1;
+  else if (dx >= SWIPE_PX)        step = -1;
+  else if (lastX < EDGE_PX)       step = -1;
   else if (lastX > 320 - EDGE_PX) step = +1;
   if (step && uiScroll(step)) {
     Serial.printf("[touch] scroll %+d\n", step);
@@ -205,7 +258,8 @@ static void runCheck() {
   }
 }
 
-// Held from power-on for HOLD_MS: the way back to setup when WiFi changed.
+// Held from power-on for HOLD_MS: the way back to setup when the old WiFi is
+// gone and the menu can't be reached over it.
 static bool heldAtBoot() {
   if (digitalRead(XPT2046_IRQ) == HIGH) return false;
   uiSplash("Keep holding for setup...");
@@ -217,12 +271,18 @@ static bool heldAtBoot() {
 
 // Serve the setup page once WiFi is up, if hosting is on or there is nothing
 // to show yet.
+// With no account yet, the board's hotspot stays up so a phone can add one
+// even on a guest network. With hosting on, the page is also on the LAN.
 static void maybeStartWeb() {
-  if (webActive() || WiFi.status() != WL_CONNECTED) return;
-  if (!cfg.hosting && accountCount > 0) return;
-  webStartLan();
-  strlcpy(wifiLink.url, webUrl().c_str(), sizeof(wifiLink.url));
-  uiDrawAll();
+  if (WiFi.status() != WL_CONNECTED) return;
+  bool changed = false;
+  if (accountCount == 0 && !webHotspotUp()) { webStartHotspot(); changed = true; }
+  if (cfg.hosting && !wifiLink.url[0]) {
+    webStartLan();
+    strlcpy(wifiLink.url, webUrl().c_str(), sizeof(wifiLink.url));
+    changed = true;
+  }
+  if (changed) uiDrawAll();
 }
 
 void setup() {
@@ -257,9 +317,11 @@ void setup() {
   settingsLoad();
   rampBacklight(onLevel(), 400);
 
-  bool held = heldAtBoot();
-  if (!settingsHaveWifi() || held) {
-    Serial.println(held ? "[boot] screen held: setup mode" : "[boot] no WiFi saved: setup mode");
+  bool asked = settingsTakeSetupFlag();       // "Change WiFi" from the menu
+  bool held = !asked && heldAtBoot();
+  if (!settingsHaveWifi() || held || asked) {
+    Serial.println(asked ? "[boot] WiFi setup requested from the menu" :
+                   held  ? "[boot] screen held: setup mode" : "[boot] no WiFi saved: setup mode");
     webStartSetupAP();
     uiSetupScreen(webApSsid(), webApPass(), webUrl().c_str());
     setupMode = true;
@@ -274,9 +336,24 @@ void setup() {
 #endif
 }
 
+// Setup hotspot screen: "Use this screen" types the WiFi in right here.
+static void setupModeTouch() {
+  int x, y;
+  if (!touchRead(x, y)) return;
+  int rx = x, ry = y, released = 0;
+  while (released < 3) { released = touchRead(x, y) ? 0 : released + 1; delay(10); }
+  if (!uiSetupButtonHit(rx, ry)) return;
+  if (screenWifiSetup()) {
+    uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
+    delay(900);
+    ESP.restart();
+  }
+  uiSetupScreen(webApSsid(), webApPass(), webUrl().c_str());
+}
+
 void loop() {
   webLoop();
-  if (setupMode) { delay(2); return; }
+  if (setupMode) { setupModeTouch(); delay(2); return; }
 
   uint32_t now = millis();
   maybeStartWeb();

@@ -10,10 +10,12 @@
 
 #define PIN_SECONDS   120
 #define PIN_TRIES     5
+#define HOTSPOT_IDLE_MS (15UL * 60UL * 1000UL)
 
 static WebServer server(80);
 static DNSServer dns;
-static bool active = false, apMode = false;
+static bool active = false, apMode = false, lanUp = false, hotspotUp = false, routesUp = false;
+static uint32_t hotspotSeen;
 static char apSsid[33], apPass[12];
 static char session[33];                 // the one signed-in browser, "" = none
 static char pin[7];
@@ -26,9 +28,16 @@ bool webActive()          { return active; }
 bool webSetupMode()       { return apMode; }
 const char *webApSsid()   { return apSsid; }
 const char *webApPass()   { return apPass; }
+bool webHotspotUp()       { return hotspotUp; }
+String webHotspotUrl()    { return "http://" + WiFi.softAPIP().toString(); }
 String webUrl() {
-  if (!active) return "";
-  return "http://" + (apMode ? WiFi.softAPIP() : WiFi.localIP()).toString();
+  if (lanUp) return "http://" + WiFi.localIP().toString();
+  if (hotspotUp || apMode) return webHotspotUrl();
+  return "";
+}
+
+static bool fromHotspot() {
+  return (hotspotUp || apMode) && server.client().localIP() == WiFi.softAPIP();
 }
 
 static void randomHex(char *out, int bytes) {
@@ -38,7 +47,7 @@ static void randomHex(char *out, int bytes) {
 // On the hotspot, anyone connected scanned the QR on the screen. On the LAN,
 // the browser must hold the session cookie that a correct PIN hands out.
 static bool authed() {
-  if (apMode) return true;
+  if (fromHotspot()) { hotspotSeen = millis(); return true; }
   if (!session[0]) return false;
   String c = server.header("Cookie");
   return c.indexOf(String("cs=") + session) >= 0;
@@ -82,6 +91,8 @@ static bool validAlias(const char *s) {
 static void handleState() {
   JsonDocument d;
   d["mode"]        = apMode ? "setup" : "lan";
+  d["via"]         = fromHotspot() ? "hotspot" : "lan";
+  d["hotspot"]     = hotspotUp ? webApSsid() : "";
   d["authed"]      = authed();
   d["hostname"]    = cfg.hostname;
   d["ssid"]        = cfg.ssid;
@@ -96,6 +107,8 @@ static void handleState() {
   d["maxAccounts"] = MAX_ACCOUNTS;
   d["pinPending"]  = pin[0] && millis() < pinUntil;
   if (authed()) {
+    String pAlias, pUrl;
+    if (apiSigninPending(pAlias, pUrl)) { d["pending"]["alias"] = pAlias; d["pending"]["url"] = pUrl; }
     JsonArray list = d["accounts"].to<JsonArray>();
     for (int i = 0; i < cfg.nAccounts; i++) {
       JsonObject a = list.add<JsonObject>();
@@ -118,7 +131,7 @@ static void handleState() {
 }
 
 static void handlePinRequest() {
-  if (apMode) { sendError(400, "No PIN needed on the setup hotspot"); return; }
+  if (fromHotspot()) { sendError(400, "No PIN needed on the board's hotspot"); return; }
   snprintf(pin, sizeof(pin), "%06u", (unsigned)(esp_random() % 1000000));
   pinUntil = millis() + PIN_SECONDS * 1000UL;
   pinTries = 0;
@@ -280,6 +293,8 @@ static void handleNotFound() {
 }
 
 static void routes() {
+  if (routesUp) return;
+  routesUp = true;
   static const char *headers[] = {"Cookie"};
   server.collectHeaders(headers, 1);
   server.on("/", HTTP_GET, [] {
@@ -300,15 +315,53 @@ static void routes() {
   server.onNotFound(handleNotFound);
 }
 
-void webStartSetupAP() {
+static void newHotspotCredentials() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   snprintf(apSsid, sizeof(apSsid), "claude-status-%02x%02x", mac[4], mac[5]);
-  // A fresh password each boot: joining requires seeing the screen.
   static const char A[] = "abcdefghjkmnpqrstuvwxyz23456789";
   for (int i = 0; i < 10; i++) apPass[i] = A[esp_random() % (sizeof(A) - 1)];
   apPass[10] = 0;
+}
 
+static void serve() {
+  routes();
+  if (!active) server.begin();
+  active = true;
+}
+
+void webStartLan() {
+  if (lanUp) return;
+  serve();
+  lanUp = true;
+  Serial.printf("[web] setup page at %s (and http://%s.local)\n", webUrl().c_str(), cfg.hostname);
+}
+
+// No captive DNS here: the board is also on WiFi, and answering every name
+// with itself would break a phone that sends its lookups over this hotspot.
+void webStartHotspot() {
+  hotspotSeen = millis();
+  if (hotspotUp) return;
+  newHotspotCredentials();
+  WiFi.mode(WIFI_AP_STA);            // keeps the existing WiFi connection
+  WiFi.softAP(apSsid, apPass);
+  delay(200);
+  serve();
+  hotspotUp = true;
+  Serial.printf("[web] hotspot %s up at %s\n", apSsid, webHotspotUrl().c_str());
+}
+
+static void stopHotspot() {
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  hotspotUp = false;
+  if (!lanUp) { server.stop(); active = false; }
+  uiHideHotspot();
+  Serial.println("[web] hotspot off (idle)");
+}
+
+void webStartSetupAP() {
+  newHotspotCredentials();
   WiFi.mode(WIFI_AP_STA);            // STA side lets the page scan for networks
   WiFi.softAP(apSsid, apPass);
   delay(200);
@@ -319,18 +372,15 @@ void webStartSetupAP() {
   Serial.printf("[web] setup hotspot %s up at %s\n", apSsid, WiFi.softAPIP().toString().c_str());
 }
 
-void webStartLan() {
-  if (active) return;
-  routes();
-  server.begin();
-  active = true;
-  Serial.printf("[web] setup page at %s (and http://%s.local)\n", webUrl().c_str(), cfg.hostname);
-}
-
 void webLoop() {
   if (!active) return;
   if (apMode) dns.processNextRequest();
   server.handleClient();
   if (pin[0] && millis() > pinUntil) { pin[0] = 0; uiHidePin(); }
   if (rebootAt && millis() > rebootAt) ESP.restart();
+  // Stays up while anyone is using it, and always while there's no account.
+  if (hotspotUp && accountCount > 0 && WiFi.softAPgetStationNum() == 0 &&
+      millis() - hotspotSeen > HOTSPOT_IDLE_MS)
+    stopHotspot();
+  if (hotspotUp && WiFi.softAPgetStationNum() > 0) hotspotSeen = millis();
 }

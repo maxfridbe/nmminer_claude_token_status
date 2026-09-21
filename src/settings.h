@@ -42,3 +42,5 @@ bool settingsHaveWifi();
 int  settingsFindAccount(const char *alias);
 void settingsRemoveAccount(int i);
 void settingsFactoryReset();
+void settingsRequestSetup();         // next boot starts WiFi setup; nothing is erased
+bool settingsTakeSetupFlag();        // true once, then cleared

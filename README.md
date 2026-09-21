@@ -4,8 +4,8 @@ A desk display for Claude usage limits. An ESP32 "Cheap Yellow Display" shows
 the session window and per-model weekly limits for up to four Claude accounts,
 checking every 15 minutes.
 
-Set it up from your phone (join its hotspot, pick your WiFi, sign in to
-Claude in the browser) or from a Linux machine with a config file and a script.
+Set it up on the touchscreen and your phone (join its hotspot, sign in to
+Claude in the browser), or from a Linux machine with a config file and a script.
 
 ![claude-status running on a Cheap Yellow Display](screenshots/claude-monitor.jpg)
 
@@ -44,21 +44,41 @@ on white, remove that flag.
 - For the script path only: the `claude` CLI (Claude Code), used to create the
   board's logins.
 
-## Set up from your phone
+## Set up on the board
 
     ./deploy_and_build.sh --web-setup
 
-1. The board starts a setup hotspot and shows a QR code. Scan it to join; the
-   hotspot password changes every boot, so joining means seeing the screen.
-2. The setup page opens by itself (or open the address on the screen). Pick
-   your WiFi, enter its password, and save. The board restarts and joins it.
-3. Reconnect your phone to that WiFi and open the address the board now shows.
-   Press **Show PIN on display**, enter the PIN, then **Add a Claude account**:
-   name it, choose model meters, tap **Open claude.ai**, approve, and paste
-   back the code claude.ai shows. Repeat for each account.
+1. **WiFi.** The board shows a setup screen. Tap **Use this screen**, pick your
+   network and type its password on the on-screen keyboard. Or scan the QR
+   code with a phone to join the board's hotspot and pick the network on the
+   page that opens.
+2. **Accounts.** With no account yet, the board keeps its own hotspot up and
+   shows a QR code to join it. On your phone, join, open `http://192.168.4.1`,
+   press **Add a Claude account**, name it, choose model meters, tap
+   **Open claude.ai**, approve, and paste back the code claude.ai shows.
 
-Hold the screen while powering on to get back to the hotspot, for example
-after your WiFi changes.
+The hotspot works on guest networks, which stop devices on them from reaching
+each other. Its password changes every time and appears only on the screen, so
+no PIN is needed on it. While your phone is on the hotspot it has no internet.
+If claude.ai won't load, tap **Copy link**, switch back to your usual network,
+approve there, copy the code, rejoin the hotspot and reopen the page. It picks
+up at the paste step.
+
+### The menu
+
+Press and hold the screen for about 1.5 seconds:
+
+| Item | Does |
+|---|---|
+| Phone setup page | turns on the board's hotspot and shows its QR code; it turns off after 15 idle minutes |
+| WiFi on this screen | pick a network and type its password on the keyboard |
+| WiFi with a phone | restarts into the setup hotspot |
+| Restart | restarts |
+| Close | back to the dashboard |
+
+Changing WiFi never touches accounts or logins. A new network is tested before
+it's saved, and cancelling keeps the old one. If the old network is gone and
+the board can't show its menu over it, hold the screen while powering on.
 
 ## Set up with a script
 
@@ -78,9 +98,10 @@ without flashing. `--monitor` tails the serial console after flashing.
 holds the only live copy of each login. Set `PORT=/dev/ttyUSBx` to pick a
 specific board.
 
-With `enable_hosting = true` the setup page stays available on your network
-after a script deploy too, for changing settings or adding accounts. Its
-address appears on the right edge of the screen, next to the WiFi name.
+With `enable_hosting = true` the setup page is also available on your
+network, for changing settings or adding accounts from any device there. Its
+address appears on the right edge of the screen, next to the WiFi name. This
+doesn't work on guest networks; use the menu's **Phone setup page** there.
 
 ### Script and website together
 
@@ -204,10 +225,11 @@ deploy, run `tools/scope_test.py <alias>`.
 | `deploy_and_build.sh` | build and flash |
 | `login.sh` | create and verify the board's own Claude logins |
 | `config.example.toml` | config template |
-| `src/main.cpp` | boot modes, check scheduler, brightness, dimming and sleep, touch |
+| `src/main.cpp` | boot modes, check scheduler, brightness, dimming and sleep, touch, menu |
 | `src/settings.cpp` | settings and logins in the board's flash; applies a script config |
 | `src/web.cpp` | setup hotspot, captive portal, setup page API, PIN |
 | `src/web_page.h` | the setup page itself |
+| `src/wifi_screen.cpp` | WiFi setup on the touchscreen: network list and keyboard |
 | `src/api.cpp` | WiFi, NTP, sign-in, token refresh, usage fetch and parsing, demo data |
 | `src/ui.cpp` | full-screen, side-by-side and scrolling layouts; ring, meters, WiFi strip |
 | `tools/gen_secrets.py` | config + logins → `include/secrets.h` |

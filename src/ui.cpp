@@ -8,6 +8,9 @@
 #include "model.h"
 #include <TFT_eSPI.h>
 #include "claude_mark.h"
+#include "settings.h"
+#include "web.h"
+#include <WiFi.h>
 #include <qrcode.h>
 
 extern TFT_eSPI tft;
@@ -392,73 +395,83 @@ static void stepText(int x, int y, const char *num, const char *text, uint16_t c
   tft.drawString(text, x + 14, y);
 }
 
-// First boot: a QR that joins the setup hotspot, and where to go next.
-void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
+// "Join the board's hotspot, then open the page": QR on the left, steps on
+// the right. Used for first-boot setup, while no account exists, and from
+// the menu.
+static void drawJoin(const char *title, const char *ssid, const char *pass, const char *url,
+                     const char *step3, const char *footer) {
   tft.fillScreen(C_BG);
   char wifiQr[96];
-  snprintf(wifiQr, sizeof(wifiQr), "WIFI:T:WPA;S:%s;P:%s;;", apSsid, apPass);
+  snprintf(wifiQr, sizeof(wifiQr), "WIFI:T:WPA;S:%s;P:%s;;", ssid, pass);
   drawQr(tft, 10, 40, 150, wifiQr);
 
   drawMark(tft, 172, 12, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
   tft.setFreeFont(&FreeSansBold9pt7b);
   tft.setTextColor(C_TEXT);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString("Setup", 196, 21);
+  tft.drawString(title, 196, 21);
 
   const int x = 172;
   stepText(x, 46, "1", "Scan to join", C_SOFT);
   tft.setTextFont(1);
   tft.setTextColor(C_DIM);
-  tft.drawString(apSsid, x + 14, 66);
-  tft.drawString(String("pw ") + apPass, x + 14, 78);
+  tft.drawString(ssid, x + 14, 66);
+  tft.drawString(String("pw ") + pass, x + 14, 78);
   stepText(x, 98, "2", "Open", C_SOFT);
   tft.setTextColor(C_TEXT);
   tft.drawString(url, x + 14, 118);
-  tft.setTextColor(C_DIM);
-  tft.drawString("(usually opens itself)", x + 14, 130);
-  stepText(x, 150, "3", "Pick your WiFi", C_SOFT);
+  stepText(x, 142, "3", step3, C_SOFT);
 
   tft.setTextFont(1);
   tft.setTextColor(C_FAINT);
   tft.setTextDatum(BL_DATUM);
-  tft.drawString("Hold the screen at power-on to return here.", 10, SCR_H - 6);
+  tft.drawString(footer, 10, SCR_H - 6);
 }
 
-// No accounts yet: point at the setup page on the LAN.
-static void drawEmptyScreen() {
-  tft.fillRect(0, 0, 2 * COL_W, SCR_H, C_BG);
-  const char *url = wifiLink.url[0] ? wifiLink.url : "";
-  if (url[0]) drawQr(tft, 12, 44, 136, url);
+#define SETUP_BTN_X 172
+#define SETUP_BTN_Y 170
+#define SETUP_BTN_W 138
+#define SETUP_BTN_H 36
 
-  const int x = 160;
-  drawMark(tft, x, 14, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-  tft.setFreeFont(&FreeSansBold9pt7b);
-  tft.setTextColor(C_TEXT);
-  tft.setTextDatum(ML_DATUM);
-  tft.drawString("Add an", x + 24, 23);
-  tft.drawString("account", x + 24, 43);
+void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
+  drawJoin("WiFi setup", apSsid, apPass, url, "Pick your WiFi",
+           "Accounts and logins are kept. Power-cycle to cancel.");
+  // Or skip the phone: type the WiFi password on this screen.
+  tft.fillSmoothRoundRect(SETUP_BTN_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, 9, C_MARK, C_BG);
   tft.setTextFont(2);
-  tft.setTextColor(C_SOFT);
-  tft.setTextDatum(TL_DATUM);
-  tft.drawString("On any device on", x, 70);
-  tft.drawString(String(wifiLink.ssid) + ", open:", x, 88);
-  tft.setTextColor(C_TEXT);
-  tft.drawString(url[0] ? url : "(joining WiFi...)", x, 112);
-  tft.setTextFont(1);
-  tft.setTextColor(C_DIM);
-  tft.drawString("or scan the code", x, 136);
+  tft.setTextColor(C_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Use this screen", SETUP_BTN_X + SETUP_BTN_W / 2, SETUP_BTN_Y + SETUP_BTN_H / 2);
 }
 
+bool uiSetupButtonHit(int x, int y) {
+  return x >= SETUP_BTN_X - 6 && x < SETUP_BTN_X + SETUP_BTN_W + 6 &&
+         y >= SETUP_BTN_Y - 6 && y < SETUP_BTN_Y + SETUP_BTN_H + 6;
+}
+
+// ---------------------------------------------------------------- overlays
+
+static OverlayKind overlay = OV_NONE;
 static char pinShown[7] = "";
+static char hsSsid[33], hsPass[16], hsUrl[40];
+
+int  uiOverlay() { return overlay; }
 
 void uiShowPin(const char *pin) {
   strlcpy(pinShown, pin, sizeof(pinShown));
+  overlay = OV_PIN;
   uiDrawAll();
 }
+void uiHidePin()      { if (overlay == OV_PIN) uiCloseOverlay(); }
+void uiHideHotspot()  { if (overlay == OV_HOTSPOT) uiCloseOverlay(); }
+void uiShowMenu()     { overlay = OV_MENU; uiDrawAll(); }
+void uiCloseOverlay() { overlay = OV_NONE; uiDrawAll(); }
 
-void uiHidePin() {
-  if (!pinShown[0]) return;
-  pinShown[0] = 0;
+void uiShowHotspot(const char *ssid, const char *pass, const char *url) {
+  strlcpy(hsSsid, ssid, sizeof(hsSsid));
+  strlcpy(hsPass, pass, sizeof(hsPass));
+  strlcpy(hsUrl, url, sizeof(hsUrl));
+  overlay = OV_HOTSPOT;
   uiDrawAll();
 }
 
@@ -480,10 +493,83 @@ static void drawPinOverlay() {
   tft.drawString("valid for 2 minutes", x + w / 2, y + h - 14);
 }
 
+// Menu rows: label and a one-line explanation.
+static const char *MENU[][2] = {
+  {"Phone setup page",    "Accounts and settings, via the board's hotspot"},
+  {"WiFi on this screen", "Pick a network, type the password here"},
+  {"WiFi with a phone",   "Restart into the setup hotspot"},
+  {"Restart",             ""},
+  {"Close",               ""},
+};
+#define MENU_N   5
+#define MENU_X   16
+#define MENU_W   (SCR_W - 32)
+#define MENU_Y0  38
+#define MENU_H   34
+#define MENU_GAP 5
+
+int uiMenuHit(int x, int y) {
+  if (overlay != OV_MENU || x < MENU_X || x > MENU_X + MENU_W) return -1;
+  for (int i = 0; i < MENU_N; i++) {
+    int top = MENU_Y0 + i * (MENU_H + MENU_GAP);
+    if (y >= top - MENU_GAP / 2 && y < top + MENU_H + MENU_GAP / 2) return i;
+  }
+  return -1;
+}
+
+static void drawMenu() {
+  tft.fillScreen(C_BG);
+  drawMark(tft, MENU_X, 10, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString("Menu", MENU_X + 26, 19);
+  char where[64];
+  snprintf(where, sizeof(where), "%s  %s", wifiLink.ssid, wifiLink.up ? WiFi.localIP().toString().c_str() : "offline");
+  tft.setTextFont(1);
+  tft.setTextColor(C_DIM);
+  tft.setTextDatum(MR_DATUM);
+  tft.drawString(where, SCR_W - MENU_X, 19);
+
+  for (int i = 0; i < MENU_N; i++) {
+    int y = MENU_Y0 + i * (MENU_H + MENU_GAP);
+    tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
+    if (i == 0) tft.drawRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_MARK);
+    bool sub = MENU[i][1][0];
+    tft.setTextFont(2);
+    tft.setTextColor(C_TEXT);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(MENU[i][0], MENU_X + 14, y + (sub ? 11 : MENU_H / 2));
+    if (sub) {
+      tft.setTextFont(1);
+      tft.setTextColor(C_DIM);
+      tft.drawString(MENU[i][1], MENU_X + 14, y + 25);
+    }
+  }
+}
+
+// No accounts yet: the hotspot is up, so show how to join it.
+static void drawEmptyScreen() {
+  if (webHotspotUp()) {
+    char footer[64] = "";
+    if (cfg.hosting && wifiLink.up)
+      snprintf(footer, sizeof(footer), "On a home network also: http://%s", WiFi.localIP().toString().c_str());
+    drawJoin("Add an account", webApSsid(), webApPass(), webHotspotUrl().c_str(),
+             "Add a Claude account", footer);
+    return;
+  }
+  tft.fillScreen(C_BG);
+  tft.setTextFont(2);
+  tft.setTextColor(C_DIM);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("No accounts yet. Joining WiFi...", SCR_W / 2, SCR_H / 2);
+}
+
 // ---------------------------------------------------------------- public
 
 // The only status is a small dot, top right of the accounts, while a check runs.
 void uiDrawStatus() {
+  if (overlay == OV_MENU || overlay == OV_HOTSPOT) return;
   uint16_t c = netStatus == NET_CHECKING ? C_INFO : C_BG;
   tft.fillSmoothCircle(2 * COL_W - 8, 7, 3, c, C_BG);
 }
@@ -531,6 +617,12 @@ static void drawScrollHints() {
 }
 
 void uiDrawAll() {
+  if (overlay == OV_MENU) { drawMenu(); return; }
+  if (overlay == OV_HOTSPOT) {
+    drawJoin("Phone setup", hsSsid, hsPass, hsUrl, "Accounts & settings",
+             "Tap to close. The hotspot turns off after 15 idle minutes.");
+    return;
+  }
   if (accountCount == 0) {
     drawEmptyScreen();
   } else if (accountCount == 1) {
@@ -544,7 +636,7 @@ void uiDrawAll() {
   }
   if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(2 * COL_W, 0); }
   else             drawLinkStrip(tft, 2 * COL_W);
-  if (pinShown[0]) drawPinOverlay();
+  if (overlay == OV_PIN) drawPinOverlay();
   uiDrawStatus();
 }
 

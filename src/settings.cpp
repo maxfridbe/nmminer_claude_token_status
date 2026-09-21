@@ -93,6 +93,14 @@ void settingsRemoveAccount(int i) {
   settingsSave();
 }
 
+void settingsRequestSetup() { prefs.putBool("setupnext", true); }
+
+bool settingsTakeSetupFlag() {
+  if (!prefs.getBool("setupnext", false)) return false;
+  prefs.remove("setupnext");          // one boot only: power-cycling cancels
+  return true;
+}
+
 void settingsFactoryReset() {
   prefs.clear();
   Serial.println("[settings] factory reset: all settings and logins erased");
