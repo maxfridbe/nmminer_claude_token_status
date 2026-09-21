@@ -50,4 +50,7 @@
       and guest networks block desktop-to-board traffic, so it needs a relay.
 - [ ] Antigravity (`agy`) quota. Needs its live login, which isn't in
       `~/.gemini/antigravity-cli/antigravity-oauth-token`.
-- [ ] Over-the-air updates from GitHub releases, so reflashing needs no USB.
+- [x] Over-the-air updates from GitHub releases (v26.09.02). Verified on the
+      board: layout switch kept settings; installed the GitHub build of
+      v26.09.02 via OTA_SELFTEST and rebooted into it with both accounts OK.
+- [ ] Try **Update firmware** from the menu when the next release is out.
