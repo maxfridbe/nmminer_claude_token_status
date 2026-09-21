@@ -84,8 +84,8 @@ Press and hold the screen for about 1.5 seconds:
 | Phone setup page | turns on the board's hotspot and shows its QR code; it turns off after 15 idle minutes |
 | WiFi on this screen | pick a network and type its password on the keyboard |
 | WiFi with a phone | restarts into the setup hotspot |
-| Restart | restarts |
-| Close | back to the dashboard |
+| Update firmware | checks GitHub for the latest release, shows it next to the installed version, and installs it over the air |
+| Restart / Close | |
 
 Changing WiFi never touches accounts or logins. A new network is tested before
 it's saved, and cancelling keeps the old one. If the old network is gone and
@@ -262,6 +262,22 @@ deploy, run `tools/scope_test.py <alias>`.
 | `tools/svg_to_alpha.py` | rasterizes `assets/claude-mark.svg` into `include/claude_mark.h` |
 | `include/certs.h` | pinned root CAs for the two TLS endpoints |
 | `screenshots/` | photos for this README |
+
+## Updates over the air
+
+**Update firmware** in the menu downloads `claude-status-app.bin` from the
+latest GitHub release into the board's second program slot, verifies it,
+and restarts into it. Settings and logins are kept, and a failed download
+leaves the current firmware running. The installed version shows at the top
+of the menu.
+
+Boards flashed before v26.09.02 have a single program slot. They need one
+more USB flash (`./flashonly.sh`) to switch to the two-slot layout; the
+settings area doesn't move, so nothing is lost. After that, updates come from
+the menu.
+
+The board trusts whatever this repository publishes as its latest release.
+Only people who can publish releases here can change what boards install.
 
 ## Releases
 

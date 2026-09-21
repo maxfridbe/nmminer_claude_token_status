@@ -45,6 +45,13 @@ if [[ $DEMO -eq 1 ]]; then
   export PLATFORMIO_BUILD_FLAGS="-D DEMO_ACCOUNTS=${DEMO_ACCOUNTS:-2}"
 fi
 
+# Version and repo stamped into the firmware, for on-device updates.
+export FW_VERSION="${FW_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+if [[ -z "${UPDATE_REPO:-}" ]]; then
+  UPDATE_REPO="$(git remote get-url origin 2>/dev/null | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
+  export UPDATE_REPO
+fi
+
 # --- toolchain: PlatformIO in a local venv, nothing installed system-wide
 if [[ ! -x "$PIO" ]]; then
   log "Installing PlatformIO into .toolchain/ (first run only, a few minutes)"

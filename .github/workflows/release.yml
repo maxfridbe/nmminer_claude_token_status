@@ -32,6 +32,9 @@ jobs:
           .toolchain/bin/pip install --quiet platformio
 
       - name: Build firmware image
+        env:
+          FW_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+          UPDATE_REPO: ${{ github.repository }}
         run: tools/make_release.sh
 
       - name: Check the image embeds no config or credentials
@@ -53,6 +56,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             firmware/claude-status.bin firmware/claude-status.bin.sha256 \
+            firmware/claude-status-app.bin firmware/claude-status-app.bin.sha256 \
             --title "claude-status $GITHUB_REF_NAME" \
-            --notes "Generic firmware for the ESP32-2432S028 (Cheap Yellow Display). Flash it with ./flashonly.sh, or with esptool at offset 0x0, then set up on the board: WiFi on the touchscreen, Claude accounts from your phone. See the README." \
+            --notes "Generic firmware for the ESP32-2432S028 (Cheap Yellow Display). New board: ./flashonly.sh, then set up on the touchscreen. Board already on an OTA-capable release: hold the screen, Update firmware. claude-status-app.bin is the over-the-air image. See the README." \
             --generate-notes

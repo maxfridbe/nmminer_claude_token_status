@@ -10,6 +10,7 @@
 #include "claude_mark.h"
 #include "settings.h"
 #include "web.h"
+#include "update.h"
 #include <WiFi.h>
 #include <qrcode.h>
 
@@ -521,12 +522,13 @@ static void drawPinOverlay() {
 }
 
 // Menu rows: label and a one-line explanation.
+// The last row holds two half-width buttons: Restart and Close.
 static const char *MENU[][2] = {
   {"Phone setup page",    "Accounts and settings, via the board's hotspot"},
   {"WiFi on this screen", "Pick a network, type the password here"},
   {"WiFi with a phone",   "Restart into the setup hotspot"},
-  {"Restart",             ""},
-  {"Close",               ""},
+  {"Update firmware",     "Download the latest release from GitHub"},
+  {"Restart",             "Close"},
 };
 #define MENU_N   5
 #define MENU_X   16
@@ -539,7 +541,8 @@ int uiMenuHit(int x, int y) {
   if (overlay != OV_MENU || x < MENU_X || x > MENU_X + MENU_W) return -1;
   for (int i = 0; i < MENU_N; i++) {
     int top = MENU_Y0 + i * (MENU_H + MENU_GAP);
-    if (y >= top - MENU_GAP / 2 && y < top + MENU_H + MENU_GAP / 2) return i;
+    if (y >= top - MENU_GAP / 2 && y < top + MENU_H + MENU_GAP / 2)
+      return (i == MENU_N - 1 && x >= MENU_X + MENU_W / 2) ? MENU_N : i;   // Close
   }
   return -1;
 }
@@ -552,7 +555,8 @@ static void drawMenu() {
   tft.setTextDatum(ML_DATUM);
   tft.drawString("Menu", MENU_X + 26, 19);
   char where[64];
-  snprintf(where, sizeof(where), "%s  %s", wifiLink.ssid, wifiLink.up ? WiFi.localIP().toString().c_str() : "offline");
+  snprintf(where, sizeof(where), "%s  %s  %s", fwVersion(), wifiLink.ssid,
+           wifiLink.up ? WiFi.localIP().toString().c_str() : "offline");
   tft.setTextFont(1);
   tft.setTextColor(C_DIM);
   tft.setTextDatum(MR_DATUM);
@@ -560,6 +564,18 @@ static void drawMenu() {
 
   for (int i = 0; i < MENU_N; i++) {
     int y = MENU_Y0 + i * (MENU_H + MENU_GAP);
+    if (i == MENU_N - 1) {                        // Restart | Close
+      const int half = (MENU_W - 6) / 2;
+      for (int k = 0; k < 2; k++) {
+        int bx = MENU_X + k * (half + 6);
+        tft.fillSmoothRoundRect(bx, y, half, MENU_H, 10, rgb(0x16161B), C_BG);
+        tft.setTextFont(2);
+        tft.setTextColor(C_TEXT);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString(MENU[i][k], bx + half / 2, y + MENU_H / 2);
+      }
+      continue;
+    }
     tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
     if (i == 0) tft.drawRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_MARK);
     bool sub = MENU[i][1][0];

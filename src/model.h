@@ -76,5 +76,7 @@ bool   uiSetupButtonHit(int x, int y); // "Use this screen" on the setup screen
 
 // main.cpp: one calibrated touch sample, false when not pressed
 bool   touchRead(int &x, int &y);
+// wifi_screen.cpp: blocks for one tap (the point where it started); false on timeout
+bool   touchWaitTap(int &x, int &y, uint32_t timeoutMs = 0);
 bool   uiScroll(int delta);   // with 3+ accounts: +1 right, -1 left; true if it moved
 bool   uiNextPage();          // with 3+ accounts: advance one page, wrapping around

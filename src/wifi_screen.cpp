@@ -15,7 +15,7 @@ static uint16_t cBg, cKey, cKeyHi, cText, cDim, cAccent, cBad;
 // ---------------------------------------------------------------- touch
 
 // One tap: the point where the finger first came down, reported on release.
-static bool waitTap(int &x, int &y, uint32_t timeoutMs = 0) {
+bool touchWaitTap(int &x, int &y, uint32_t timeoutMs) {
   uint32_t start = millis();
   int tx, ty;
   while (!touchRead(tx, ty)) {
@@ -148,7 +148,7 @@ static bool keyboard(const char *title, const char *sub, String &text, bool secr
     drawField(text, show);
 
     int x, y;
-    waitTap(x, y);
+    touchWaitTap(x, y);
     if (inBox(x, y, SCR_W - 60, 26, 52, 30)) { show = !show; continue; }
 
     for (int i = 0; i < n; i++) {
@@ -246,7 +246,7 @@ static int pickNetwork(Net *nets, int n) {
     button(238, by, 74, 32, "Cancel", cKeyHi, cText);
 
     int x, y;
-    waitTap(x, y);
+    touchWaitTap(x, y);
     if (y >= by) {
       if (x < 78)       { if (page > 0) page--; }
       else if (x < 154) { if (page < pages - 1) page++; }
@@ -291,7 +291,7 @@ static bool message(const char *title, const char *line, const char *ok, const c
   if (cancel) button(170, 150, 110, 40, cancel, cKeyHi, cText);
   for (;;) {
     int x, y;
-    waitTap(x, y);
+    touchWaitTap(x, y);
     if (inBox(x, y, 40, 150, 110, 40)) return true;
     if (cancel && inBox(x, y, 170, 150, 110, 40)) return false;
   }

@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "web.h"
 #include "wifi_screen.h"
+#include "update.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <TFT_eSPI.h>
@@ -177,12 +178,16 @@ static void menuAction(int item) {
       delay(700);
       ESP.restart();
       break;
-    case 3:
+    case 3:   // firmware from the latest GitHub release
+      screenFirmwareUpdate();
+      uiCloseOverlay();
+      break;
+    case 4:
       uiSplash("Restarting...");
       delay(400);
       ESP.restart();
       break;
-    case 4:
+    case 5:
       uiCloseOverlay();
       break;
   }
@@ -288,7 +293,7 @@ static void maybeStartWeb() {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println("\nclaude-status starting");
+  Serial.printf("\nclaude-status %s starting\n", fwVersion());
 
   tft.init();
   tft.setRotation(1);
@@ -333,6 +338,9 @@ void setup() {
   apiWifiUp();
   maybeStartWeb();
   runCheck();
+#ifdef OTA_SELFTEST
+  updateSelfTest();
+#endif
 #endif
 }
 
