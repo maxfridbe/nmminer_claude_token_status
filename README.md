@@ -84,7 +84,7 @@ Press and hold the screen for about 1.5 seconds:
 | Phone setup page | turns on the board's hotspot and shows its QR code; it turns off after 15 idle minutes |
 | WiFi on this screen | pick a network and type its password on the keyboard |
 | WiFi with a phone | restarts into the setup hotspot |
-| Update firmware | checks GitHub for the latest release, shows it next to the installed version, and installs it over the air |
+| Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
 | Restart / Close | |
 
 Changing WiFi never touches accounts or logins. A new network is tested before
@@ -267,7 +267,9 @@ deploy, run `tools/scope_test.py <alias>`.
 
 **Update firmware** in the menu downloads `claude-status-app.bin` from the
 latest GitHub release into the board's second program slot, verifies it,
-and restarts into it. Settings and logins are kept, and a failed download
+and restarts into it. **Versions** on the same screen lists every release
+that has an over-the-air image (v26.09.02 and later), newest first, with the
+installed one marked; tap one to install it, older ones included. Settings and logins are kept, and a failed download
 leaves the current firmware running. The installed version shows at the top
 of the menu.
 

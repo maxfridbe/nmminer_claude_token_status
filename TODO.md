@@ -53,4 +53,5 @@
 - [x] Over-the-air updates from GitHub releases (v26.09.02). Verified on the
       board: layout switch kept settings; installed the GitHub build of
       v26.09.02 via OTA_SELFTEST and rebooted into it with both accounts OK.
-- [ ] Try **Update firmware** from the menu when the next release is out.
+- [x] **Update firmware** from the menu: v26.09.02 to v26.09.03 on the board, accounts kept.
+- [ ] **Versions** (v26.09.04): downgrade to v26.09.03, then update back.
