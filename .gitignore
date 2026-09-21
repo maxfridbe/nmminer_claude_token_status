@@ -1,0 +1,13 @@
+# Build tooling and output (compiled firmware embeds tokens)
+.toolchain/
+.pio/
+__pycache__/
+
+# Generated per build from ~/.config/claude-status; holds tokens and WiFi credentials
+include/secrets.h
+
+# Never commit a real config or login, even if one is copied in by mistake
+config.toml
+*.credentials.json
+.credentials.json
+verified-email

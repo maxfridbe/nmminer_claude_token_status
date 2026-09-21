@@ -1,0 +1,28 @@
+# claude-status configuration.
+#
+# Copy to ~/.config/claude-status/config.toml (deploy_and_build.sh does this
+# for you on first run) and keep it private: it holds your WiFi password.
+
+[wifi]
+ssid     = "YourNetwork"
+password = "your-wifi-password"     # "" for an open network
+
+[device]
+hostname      = "claude-status"     # how the board appears on your network
+refresh_scope = "user:profile"      # all the usage endpoint needs; "" keeps the full login
+# timezone    = "PST8PDT,M3.2.0,M11.1.0"   # POSIX TZ; default: this computer's
+
+# One block per Claude account, at most two. `alias` is what the screen shows.
+# `email` is checked when you log in, so the wrong account can't slip in.
+# `models` picks the per-model meters; a model with no limit of its own shows
+# the all-models weekly limit. Leave it empty to show every limit.
+
+[[account]]
+alias  = "personal"
+email  = "you@example.com"
+models = ["Opus"]
+
+[[account]]
+alias  = "work"
+email  = "you@work.example.com"
+models = ["Opus", "Fable"]
