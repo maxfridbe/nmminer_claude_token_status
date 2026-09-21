@@ -6,6 +6,8 @@
 #   ./deploy_and_build.sh --monitor     flash, then tail the serial console
 #   ./deploy_and_build.sh --demo        offline demo: no config, logins or network
 #   DEMO_ACCOUNTS=3 ./deploy_and_build.sh --demo   preview the layout for 1-4 accounts
+#   ./deploy_and_build.sh --web-setup   no config: the board sets itself up by phone
+#   ./deploy_and_build.sh --erase ...   wipe the board first (its settings and logins)
 #
 # Config and device logins live in ~/.config/claude-status/ (override with
 # CLAUDE_STATUS_CONFIG_DIR). Tokens are written to include/secrets.h only for
@@ -24,13 +26,15 @@ log()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
-BUILD_ONLY=0; DEMO=0; MONITOR=0
+BUILD_ONLY=0; DEMO=0; MONITOR=0; WEB_SETUP=0; ERASE=0
 for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
     --demo)       DEMO=1 ;;
     --monitor|-m) MONITOR=1 ;;
-    -h|--help)    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --web-setup)  WEB_SETUP=1 ;;
+    --erase)      ERASE=1 ;;
+    -h|--help)    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown option: $arg (try --help)" ;;
   esac
 done
@@ -55,7 +59,10 @@ scrub() {
   rm -rf .pio/build/cyd/src .pio/build/cyd/firmware.*
 }
 
-if [[ $DEMO -eq 0 ]]; then
+if [[ $WEB_SETUP -eq 1 ]]; then
+  log "Web-setup build: no config or logins; the board starts a setup hotspot"
+  rm -f include/secrets.h
+elif [[ $DEMO -eq 0 ]]; then
   if [[ ! -f "$CONFIG" ]]; then
     mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
     cp config.example.toml "$CONFIG" && chmod 600 "$CONFIG"
@@ -70,7 +77,7 @@ if [[ $BUILD_ONLY -eq 1 ]]; then
   log "Building env:$ENV_NAME"
   "$PIO" run -e "$ENV_NAME"
   log "Build OK"
-  [[ $DEMO -eq 0 ]] && log "Output removed: it embeds your tokens. Run without --build-only to flash."
+  [[ $DEMO -eq 0 && $WEB_SETUP -eq 0 ]] && log "Output removed: it embeds your tokens. Run without --build-only to flash."
   exit 0
 fi
 
@@ -87,6 +94,13 @@ if [[ ! -r "$PORT" || ! -w "$PORT" ]]; then
   warn "Permanent fix: sudo usermod -aG dialout \$USER   (then log out and back in)"
   warn "Until replug:  sudo chmod 666 $PORT"
   die  "Cannot flash without port access"
+fi
+
+if [[ $ERASE -eq 1 ]]; then
+  warn "--erase wipes the board's WiFi, accounts, and its only copy of each login."
+  read -r -p "Type ERASE to continue: " answer </dev/tty
+  [[ "$answer" == "ERASE" ]] || die "Not erased"
+  "$PIO" run -e "$ENV_NAME" -t erase --upload-port "$PORT"
 fi
 
 log "Flashing env:$ENV_NAME to $PORT"

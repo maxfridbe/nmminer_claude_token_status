@@ -32,6 +32,8 @@ enum NetStatus { NET_IDLE, NET_CHECKING, NET_OK, NET_PARTIAL, NET_FAILED };
 // The WiFi link, shown on the right edge. WiFi stays connected between checks.
 struct Link {
   char ssid[33];
+  char url[40];       // setup page address when it's being served, else ""
+
   int  rssi;          // dBm, last reading while connected
   bool up;
 };
@@ -47,11 +49,18 @@ extern Link      wifiLink;
 void apiInit();
 void apiCheckAll();
 void apiPollLink();   // refresh wifiLink.up / wifiLink.rssi without touching the API
+void   apiSyncAccounts();                                        // settings -> display model
+bool   apiWifiUp();                                              // join the configured WiFi
+String apiSigninStart(const char *alias, const char *models);   // returns the claude.ai link
+bool   apiSigninFinish(String pasted, String &err, String &email);
 
 // ui.cpp
 void   uiInit();
 void   uiSplash(const char* status);
 void   uiDrawAll();
 void   uiDrawStatus();
+void   uiSetupScreen(const char *apSsid, const char *apPass, const char *url);
+void   uiShowPin(const char *pin);   // overlay until uiHidePin(), redrawn by uiDrawAll()
+void   uiHidePin();
 bool   uiScroll(int delta);   // with 3+ accounts: +1 right, -1 left; true if it moved
 bool   uiNextPage();          // with 3+ accounts: advance one page, wrapping around

@@ -36,9 +36,19 @@ def load(path=None):
     if not ssid:
         raise ConfigError("[wifi] ssid is required")
     hostname = dev.get("hostname", "claude-status")
-    page_seconds = dev.get("page_seconds", 12)
-    if not isinstance(page_seconds, int) or page_seconds < 0:
-        raise ConfigError("[device] page_seconds must be a whole number of seconds, 0 to disable")
+    def whole(name, default, lo, hi):
+        v = dev.get(name, default)
+        if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
+            raise ConfigError(f"[device] {name} must be a whole number from {lo} to {hi}")
+        return v
+    page_seconds    = whole("page_seconds", 12, 0, 3600)
+    refresh_minutes = whole("refresh_minutes", 15, 1, 240)
+    brightness      = whole("brightness", 90, 5, 100)
+    sleep_minutes   = whole("sleep_minutes", 0, 0, 1440)
+    dim_minutes     = whole("dim_minutes", 5, 0, 120)
+    hosting = dev.get("enable_hosting", False)
+    if not isinstance(hosting, bool):
+        raise ConfigError("[device] enable_hosting must be true or false")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,31}", hostname):
         raise ConfigError(f"[device] hostname '{hostname}': letters, digits and '-' only, max 32")
 
@@ -66,6 +76,11 @@ def load(path=None):
         "password": wifi.get("password", ""),
         "hostname": hostname,
         "page_seconds": page_seconds,
+        "refresh_minutes": refresh_minutes,
+        "brightness": brightness,
+        "sleep_minutes": sleep_minutes,
+        "dim_minutes": dim_minutes,
+        "enable_hosting": hosting,
         "refresh_scope": dev.get("refresh_scope", "user:profile"),
         "timezone": dev.get("timezone", ""),
         "client_id": dev.get("oauth_client_id", CLAUDE_CODE_CLIENT_ID),

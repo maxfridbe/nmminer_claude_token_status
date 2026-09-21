@@ -1,12 +1,11 @@
-// Network layer: WiFi, clock, OAuth token refresh, and the usage endpoint.
+// Network layer: WiFi, clock, OAuth (sign-in, refresh), and the usage endpoint.
 //
-// Each account's tokens are seeded from secrets.h only when that account's
-// login changed since the last flash (ACCT_SEED differs). Otherwise the
-// tokens in NVS win, because the device rotates its refresh token on every
-// refresh and the copy baked into the firmware is already spent.
-// Nothing in this file ever logs a token value.
+// Accounts and tokens live in the settings (settings.cpp). The board refreshes
+// its own tokens and stores each rotated refresh token, so its logins must
+// never be shared with another client. Nothing here ever logs a token value.
 
 #include "model.h"
+#include "settings.h"
 
 #ifndef DEMO_DATA
 
@@ -14,72 +13,45 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <Preferences.h>
+#include <ESPmDNS.h>
+#include <mbedtls/sha256.h>
+#include <esp_random.h>
 #include "certs.h"
 
-#if __has_include("secrets.h")
-#include "secrets.h"
-#else
-#error "include/secrets.h is missing: run ./build.sh or ./deploy.sh, which generate it from the device logins"
-#endif
-
-static const char* USAGE_URL  = "https://api.anthropic.com/api/oauth/usage";
-static const char* TOKEN_URL  = "https://platform.claude.com/v1/oauth/token";
-static const char* USER_AGENT = "claude-status/1.0 (esp32)";
+static const char* USAGE_URL     = "https://api.anthropic.com/api/oauth/usage";
+static const char* PROFILE_URL   = "https://api.anthropic.com/api/oauth/profile";
+static const char* TOKEN_URL     = "https://platform.claude.com/v1/oauth/token";
+static const char* AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize";
+static const char* REDIRECT_URL  = "https://platform.claude.com/oauth/code/callback";
+static const char* CLIENT_ID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";  // Claude Code's
+static const char* USER_AGENT    = "claude-status/1.0 (esp32)";
 
 static const uint64_t EXPIRY_MARGIN_MS = 5ULL * 60ULL * 1000ULL;
 static const int      WIFI_ATTEMPTS    = 3;
 static const uint32_t WIFI_ATTEMPT_MS  = 12000;
 
-struct Token {
-  String   access;
-  String   refresh;
-  uint64_t expiresMs;
-};
+static bool clockConfigured = false;
+static bool mdnsUp = false;
 
-static Preferences prefs;
-static Token       tokens[MAX_ACCOUNTS];
-static bool        clockConfigured = false;
-
-static String nvsKey(const char* base, int i) { return String(base) + i; }
 static uint64_t nowMs() { return (uint64_t)time(nullptr) * 1000ULL; }
 
-static void saveToken(int i) {
-  prefs.putString(nvsKey("at", i).c_str(), tokens[i].access);
-  prefs.putString(nvsKey("rt", i).c_str(), tokens[i].refresh);
-  prefs.putULong64(nvsKey("ex", i).c_str(), tokens[i].expiresMs);
+// Mirror the settings' accounts into the display model.
+void apiSyncAccounts() {
+  accountCount = cfg.nAccounts;
+  for (int i = 0; i < MAX_ACCOUNTS; i++) {
+    Account &a = accounts[i];
+    if (i >= cfg.nAccounts) { a = Account(); continue; }
+    if (strcmp(a.label, cfg.acct[i].alias)) {   // new or moved: drop stale numbers
+      a = Account();
+      strlcpy(a.label, cfg.acct[i].alias, sizeof(a.label));
+    }
+    strlcpy(a.plan, cfg.acct[i].plan, sizeof(a.plan));
+  }
 }
 
 void apiInit() {
-  strlcpy(wifiLink.ssid, WIFI_SSID, sizeof(wifiLink.ssid));
-  // Namespace predates the project rename. A board's only live tokens are
-  // stored under it, so changing it would strand every deployed login.
-  prefs.begin("claudecounts", false);
-  accountCount = min(ACCOUNT_COUNT, MAX_ACCOUNTS);
-
-  for (int i = 0; i < accountCount; i++) {
-    Account &a = accounts[i];
-    strlcpy(a.label, ACCT_LABEL[i], sizeof(a.label));
-    strlcpy(a.plan, ACCT_PLAN[i], sizeof(a.plan));
-
-    String seedKey = nvsKey("seed", i);
-    if (prefs.getString(seedKey.c_str(), "") != ACCT_SEED[i]) {
-      // Expire the seeded access token at once: the first check refreshes,
-      // which narrows the login to ACCT_SCOPE and retires the broader
-      // tokens baked into this firmware image.
-      tokens[i].access    = ACCT_ACCESS[i];
-      tokens[i].refresh   = ACCT_REFRESH[i];
-      tokens[i].expiresMs = 0;
-      saveToken(i);
-      prefs.putString(seedKey.c_str(), ACCT_SEED[i]);
-      Serial.printf("[auth] %s: new login in this flash, seeded NVS\n", a.label);
-    } else {
-      tokens[i].access    = prefs.getString(nvsKey("at", i).c_str(), "");
-      tokens[i].refresh   = prefs.getString(nvsKey("rt", i).c_str(), "");
-      tokens[i].expiresMs = prefs.getULong64(nvsKey("ex", i).c_str(), 0);
-      Serial.printf("[auth] %s: same login as before, kept NVS tokens\n", a.label);
-    }
-  }
+  strlcpy(wifiLink.ssid, cfg.ssid, sizeof(wifiLink.ssid));
+  apiSyncAccounts();
 }
 
 // ---------------------------------------------------------------- WiFi + clock
@@ -92,9 +64,9 @@ static bool wifiUp(String &err) {
   for (int attempt = 1; attempt <= WIFI_ATTEMPTS; attempt++) {
     // The hostname is applied when the STA interface starts, so set it while off.
     WiFi.mode(WIFI_OFF);
-    WiFi.setHostname(DEVICE_HOSTNAME);
+    WiFi.setHostname(cfg.hostname);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.begin(cfg.ssid, cfg.pass);
 
     uint32_t start = millis();
     while ((st = WiFi.status()) != WL_CONNECTED && millis() - start < WIFI_ATTEMPT_MS) {
@@ -103,8 +75,12 @@ static bool wifiUp(String &err) {
     }
     if (st == WL_CONNECTED) {
       WiFi.setAutoReconnect(true);
-      Serial.printf("[wifi] %s connected as %s (attempt %d), ip %s, rssi %d\n", WIFI_SSID,
-                    DEVICE_HOSTNAME, attempt, WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      if (!mdnsUp && MDNS.begin(cfg.hostname)) {
+        MDNS.addService("http", "tcp", 80);
+        mdnsUp = true;
+      }
+      Serial.printf("[wifi] %s connected as %s (attempt %d), ip %s, rssi %d\n", cfg.ssid,
+                    cfg.hostname, attempt, WiFi.localIP().toString().c_str(), WiFi.RSSI());
       return true;
     }
     Serial.printf("[wifi] attempt %d/%d failed (status %d)\n", attempt, WIFI_ATTEMPTS, (int)st);
@@ -112,10 +88,15 @@ static bool wifiUp(String &err) {
     delay(400);
   }
 
-  if (st == WL_NO_SSID_AVAIL)       err = String(WIFI_SSID) + " not in range";
-  else if (st == WL_CONNECT_FAILED) err = String("Wrong password for ") + WIFI_SSID;
-  else                              err = String("Can't join ") + WIFI_SSID;
+  if (st == WL_NO_SSID_AVAIL)       err = String(cfg.ssid) + " not in range";
+  else if (st == WL_CONNECT_FAILED) err = String("Wrong password for ") + cfg.ssid;
+  else                              err = String("Can't join ") + cfg.ssid;
   return false;
+}
+
+bool apiWifiUp() {
+  String err;
+  return wifiUp(err);
 }
 
 void apiPollLink() {
@@ -126,7 +107,7 @@ void apiPollLink() {
 // TLS certificate checks need a real clock, and reset times are shown locally.
 static bool clockUp() {
   if (!clockConfigured) {
-    configTzTime(TZ_POSIX, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+    configTzTime(cfg.tz, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
     clockConfigured = true;
   }
   uint32_t start = millis();
@@ -229,7 +210,7 @@ static bool parseUsage(const String &body, int acct, Account &a, String &err) {
 
   // Show the models configured for this account. A model without a limit of
   // its own draws on the all-models weekly limit, so that is what it shows.
-  String wanted = ACCT_MODELS[acct];
+  String wanted = cfg.acct[acct].models;
   if (wanted.length() == 0) {
     if (haveWeekly) setBucket(out[n++], "Weekly", weekly, false);
     for (int s = 0; s < ns && n < MAX_BUCKETS; s++) setBucket(out[n++], scoped[s].name, scoped[s], false);
@@ -263,84 +244,83 @@ static String httpError(int code) {
   return HTTPClient::errorToString(code);
 }
 
-static bool refreshToken(int i, String &err) {
+// POST JSON to the token endpoint; returns the HTTP status and the reply.
+static int postToken(JsonDocument &req, String &resp) {
   WiFiClientSecure tls;
   tls.setCACert(ROOT_CAS);
   HTTPClient http;
   http.setTimeout(15000);
-  if (!http.begin(tls, TOKEN_URL)) { err = "Token URL rejected"; return false; }
+  if (!http.begin(tls, TOKEN_URL)) return HTTPC_ERROR_CONNECTION_REFUSED;
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", USER_AGENT);
-
   String body;
-  {
-    JsonDocument req;
-    req["grant_type"]    = "refresh_token";
-    req["refresh_token"] = tokens[i].refresh;
-    req["client_id"]     = OAUTH_CLIENT_ID;
-    req["scope"]         = ACCT_SCOPE[i];
-    serializeJson(req, body);
-  }
+  serializeJson(req, body);
   int code = http.POST(body);
-  String resp = (code > 0) ? http.getString() : String();
+  resp = (code > 0) ? http.getString() : String();
   http.end();
-
-  if (code != 200) {
-    // Error bodies carry no tokens; a short excerpt helps diagnose rejections.
-    Serial.printf("[auth] %s refresh failed: %s %.120s\n", accounts[i].label,
-                  httpError(code).c_str(), resp.c_str());
-    err = (code == 400 || code == 401) ? "Login expired: ./login.sh" : "Refresh " + httpError(code);
-    return false;
-  }
-
-  JsonDocument doc;
-  if (deserializeJson(doc, resp) || !doc["access_token"].is<const char *>()) {
-    err = "Refresh reply unreadable";
-    return false;
-  }
-
-  // Field names only, never values: shows what the server sends back, e.g.
-  // whether it reports a refresh-token lifetime.
-  String fields;
-  for (JsonPairConst kv : doc.as<JsonObjectConst>()) { fields += ' '; fields += kv.key().c_str(); }
-  Serial.printf("[auth] %s refresh reply fields:%s\n", accounts[i].label, fields.c_str());
-
-  tokens[i].access = doc["access_token"].as<const char *>();
-  if (doc["refresh_token"].is<const char *>()) {
-    String rt = doc["refresh_token"].as<const char *>();
-    if (rt != tokens[i].refresh) {
-      tokens[i].refresh = rt;
-      Serial.printf("[auth] %s refresh token rotated, stored new one\n", accounts[i].label);
-    }
-  }
-  uint32_t ttl = doc["expires_in"] | 3600;
-  tokens[i].expiresMs = nowMs() + (uint64_t)ttl * 1000ULL;
-  saveToken(i);
-  Serial.printf("[auth] %s access token refreshed, valid %lu min, scope '%s'\n", accounts[i].label,
-                (unsigned long)(ttl / 60), doc["scope"] | "?");
-
-  // Whether this lifetime resets on each refresh or counts down to a fixed
-  // end decides how long the device runs without a new login.
-  if (doc["refresh_token_expires_in"].is<uint32_t>()) {
-    uint32_t rtl = doc["refresh_token_expires_in"];
-    Serial.printf("[auth] %s refresh token valid %.1f days\n", accounts[i].label, rtl / 86400.0f);
-  }
-  return true;
+  return code;
 }
 
-static int getUsage(int i, String &body) {
+static int apiGet(const char *url, const String &token, String &body) {
   WiFiClientSecure tls;
   tls.setCACert(ROOT_CAS);
   HTTPClient http;
   http.setTimeout(15000);
-  if (!http.begin(tls, USAGE_URL)) return HTTPC_ERROR_CONNECTION_REFUSED;
-  http.addHeader("Authorization", "Bearer " + tokens[i].access);
+  if (!http.begin(tls, url)) return HTTPC_ERROR_CONNECTION_REFUSED;
+  http.addHeader("Authorization", "Bearer " + token);
   http.addHeader("anthropic-beta", "oauth-2025-04-20");
   http.addHeader("User-Agent", USER_AGENT);
   int code = http.GET();
   if (code == 200) body = http.getString();
   http.end();
   return code;
+}
+
+// Store a token reply (from a refresh or a sign-in) on account i.
+static void takeTokens(int i, JsonDocument &doc) {
+  AccountCfg &a = cfg.acct[i];
+  a.access = doc["access_token"].as<const char *>();
+  if (doc["refresh_token"].is<const char *>()) {
+    String rt = doc["refresh_token"].as<const char *>();
+    if (rt != a.refresh && a.refresh.length())
+      Serial.printf("[auth] %s refresh token rotated, stored new one\n", a.alias);
+    a.refresh = rt;
+  }
+  uint32_t ttl = doc["expires_in"] | 3600;
+  a.expiresMs = nowMs() + (uint64_t)ttl * 1000ULL;
+  settingsSaveTokens(i);
+  Serial.printf("[auth] %s access token valid %lu min, scope '%s'\n", a.alias,
+                (unsigned long)(ttl / 60), doc["scope"] | "?");
+  // Whether this lifetime resets on each refresh or counts down to a fixed
+  // end decides how long the board runs without a new sign-in.
+  if (doc["refresh_token_expires_in"].is<uint32_t>())
+    Serial.printf("[auth] %s refresh token valid %.1f days\n", a.alias,
+                  doc["refresh_token_expires_in"].as<uint32_t>() / 86400.0f);
+}
+
+static bool refreshToken(int i, String &err) {
+  JsonDocument req;
+  req["grant_type"]    = "refresh_token";
+  req["refresh_token"] = cfg.acct[i].refresh;
+  req["client_id"]     = CLIENT_ID;
+  req["scope"]         = cfg.acct[i].scope;
+  String resp;
+  int code = postToken(req, resp);
+
+  if (code != 200) {
+    // Error bodies carry no tokens; a short excerpt helps diagnose rejections.
+    Serial.printf("[auth] %s refresh failed: %s %.120s\n", cfg.acct[i].alias,
+                  httpError(code).c_str(), resp.c_str());
+    err = (code == 400 || code == 401) ? "Login expired: sign in again" : "Refresh " + httpError(code);
+    return false;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, resp) || !doc["access_token"].is<const char *>()) {
+    err = "Refresh reply unreadable";
+    return false;
+  }
+  takeTokens(i, doc);
+  return true;
 }
 
 static void fail(Account &a, const String &err) {
@@ -350,16 +330,17 @@ static void fail(Account &a, const String &err) {
 
 static void checkAccount(int i) {
   Account &a = accounts[i];
+  AccountCfg &c = cfg.acct[i];
   String err, body;
 
-  if (tokens[i].access.isEmpty() || nowMs() + EXPIRY_MARGIN_MS >= tokens[i].expiresMs) {
+  if (c.access.isEmpty() || nowMs() + EXPIRY_MARGIN_MS >= c.expiresMs) {
     if (!refreshToken(i, err)) { fail(a, err); return; }
   }
 
-  int code = getUsage(i, body);
+  int code = apiGet(USAGE_URL, c.access, body);
   if (code == 401) {                          // revoked early: one refresh, one retry
     if (!refreshToken(i, err)) { fail(a, err); return; }
-    code = getUsage(i, body);
+    code = apiGet(USAGE_URL, c.access, body);
   }
   if (code != 200) {
     Serial.printf("[usage] %s: %s\n", a.label, httpError(code).c_str());
@@ -406,6 +387,150 @@ void apiCheckAll() {
                 (unsigned)ESP.getFreeHeap());
 }
 
+// ---------------------------------------------------------------- sign-in
+
+// Claude Code's copy-paste sign-in for machines without a browser: the user
+// approves on claude.ai, which then shows a code to paste back here.
+struct Pending {
+  bool     active;
+  char     alias[24];
+  char     models[48];
+  char     verifier[64];
+  char     state[64];
+  uint32_t startedMs;
+};
+static Pending pending = {};
+
+static void base64url(const uint8_t *in, size_t n, char *out) {
+  static const char A[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  size_t o = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    uint32_t v = in[i] << 16 | (i + 1 < n ? in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+    out[o++] = A[(v >> 18) & 63];
+    out[o++] = A[(v >> 12) & 63];
+    if (i + 1 < n) out[o++] = A[(v >> 6) & 63];
+    if (i + 2 < n) out[o++] = A[v & 63];
+  }
+  out[o] = 0;
+}
+
+static void randomB64(char *out, size_t bytes) {
+  uint8_t buf[48];
+  esp_fill_random(buf, bytes);
+  base64url(buf, bytes, out);
+}
+
+static String urlEncode(const char *s) {
+  String o;
+  for (; *s; s++) {
+    if (isalnum((unsigned char)*s) || strchr("-_.~", *s)) o += *s;
+    else { char h[4]; snprintf(h, sizeof(h), "%%%02X", (unsigned char)*s); o += h; }
+  }
+  return o;
+}
+
+String apiSigninStart(const char *alias, const char *models) {
+  pending = {};
+  pending.active = true;
+  strlcpy(pending.alias, alias, sizeof(pending.alias));
+  strlcpy(pending.models, models, sizeof(pending.models));
+  randomB64(pending.verifier, 32);
+  randomB64(pending.state, 32);
+  pending.startedMs = millis();
+
+  uint8_t digest[32];
+  mbedtls_sha256((const uint8_t *)pending.verifier, strlen(pending.verifier), digest, 0);
+  char challenge[48];
+  base64url(digest, 32, challenge);
+
+  return String(AUTHORIZE_URL) + "?code=true&client_id=" + CLIENT_ID +
+         "&response_type=code&redirect_uri=" + urlEncode(REDIRECT_URL) +
+         "&scope=" + urlEncode(cfg.refreshScope) + "&code_challenge=" + challenge +
+         "&code_challenge_method=S256&state=" + pending.state;
+}
+
+// "claude_max" + "default_claude_max_5x" -> "MAX 5x"
+static void planFromProfile(JsonDocument &p, char *out, size_t n) {
+  String type = p["organization"]["organization_type"] | "";
+  String tier = p["organization"]["rate_limit_tier"] | "";
+  if (type.indexOf("max") >= 0) {
+    snprintf(out, n, "MAX%s", tier.indexOf("20x") >= 0 ? " 20x" : tier.indexOf("5x") >= 0 ? " 5x" : "");
+  } else if (type.length()) {
+    type.replace("claude_", "");
+    type.toUpperCase();
+    strlcpy(out, type.c_str(), n);
+  } else {
+    strlcpy(out, "?", n);
+  }
+}
+
+bool apiSigninFinish(String pasted, String &err, String &email) {
+  if (!pending.active || millis() - pending.startedMs > 15UL * 60UL * 1000UL) {
+    err = "That sign-in expired; start again";
+    return false;
+  }
+  pasted.trim();
+  String code = pasted, state = pending.state;
+  int hash = pasted.indexOf('#');                 // claude.ai shows "code#state"
+  if (hash >= 0) {
+    code = pasted.substring(0, hash);
+    if (pasted.substring(hash + 1) != pending.state) { err = "That code is from a different sign-in"; return false; }
+  }
+  if (!code.length()) { err = "Paste the code shown after approving"; return false; }
+  if (!apiWifiUp() || !clockUp()) { err = "No network"; return false; }
+
+  JsonDocument req;
+  req["grant_type"]    = "authorization_code";
+  req["code"]          = code;
+  req["redirect_uri"]  = REDIRECT_URL;
+  req["client_id"]     = CLIENT_ID;
+  req["code_verifier"] = pending.verifier;
+  req["state"]         = state;
+  String resp;
+  int status = postToken(req, resp);
+  if (status != 200) {
+    Serial.printf("[signin] exchange failed: %s %.160s\n", httpError(status).c_str(), resp.c_str());
+    err = status == 400 ? "Claude rejected the code; start again" : "Sign-in " + httpError(status);
+    return false;
+  }
+  JsonDocument tok;
+  if (deserializeJson(tok, resp) || !tok["access_token"].is<const char *>()) {
+    err = "Sign-in reply unreadable";
+    return false;
+  }
+
+  // Slot: replace an account with this alias, or add one.
+  int i = settingsFindAccount(pending.alias);
+  if (i < 0) {
+    if (cfg.nAccounts >= MAX_ACCOUNTS) { err = "Already at the maximum of 4 accounts"; return false; }
+    i = cfg.nAccounts++;
+    cfg.acct[i] = AccountCfg();
+  }
+  AccountCfg &a = cfg.acct[i];
+  strlcpy(a.alias, pending.alias, sizeof(a.alias));
+  strlcpy(a.models, pending.models, sizeof(a.models));
+  strlcpy(a.scope, cfg.refreshScope, sizeof(a.scope));
+  strlcpy(a.seed, "web", sizeof(a.seed));
+  a.refresh = "";
+  takeTokens(i, tok);
+
+  // Who signed in, and on which plan.
+  String body;
+  if (apiGet(PROFILE_URL, a.access, body) == 200) {
+    JsonDocument prof;
+    if (!deserializeJson(prof, body)) {
+      strlcpy(a.email, prof["account"]["email"] | "", sizeof(a.email));
+      planFromProfile(prof, a.plan, sizeof(a.plan));
+    }
+  }
+  settingsSave();
+  apiSyncAccounts();
+  pending = {};
+  email = a.email;
+  Serial.printf("[signin] %s signed in as %s (%s)\n", a.alias, a.email, a.plan);
+  return true;
+}
+
 #else  // DEMO_DATA ------------------------------------------------------------
 
 // Offline stand-in shaped like the real display. DEMO_ACCOUNTS (1-4) picks how
@@ -447,6 +572,10 @@ void apiInit() {
 }
 
 void apiPollLink() {}
+void apiSyncAccounts() {}
+bool apiWifiUp() { return false; }
+String apiSigninStart(const char *, const char *) { return ""; }
+bool apiSigninFinish(String, String &err, String &) { err = "Demo mode"; return false; }
 
 void apiCheckAll() {
   netStatus = NET_CHECKING;

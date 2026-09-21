@@ -8,6 +8,7 @@
 #include "model.h"
 #include <TFT_eSPI.h>
 #include "claude_mark.h"
+#include <qrcode.h>
 
 extern TFT_eSPI tft;
 
@@ -340,8 +341,12 @@ static void drawLinkStrip(TFT_eSPI &g, int ox) {
   int fh = (bottom - top) * q / 100;
   if (fh > 0) g.fillSmoothRoundRect(barX, bottom - fh, barW, fh, 1, qc, C_BG);
 
-  // Render the name flat in a scratch sprite, then copy it rotated.
-  const char *name = wifiLink.ssid[0] ? wifiLink.ssid : "no WiFi";
+  // Render the name flat in a scratch sprite, then copy it rotated. While the
+  // setup page is served, its address follows the network name.
+  char label[80];
+  if (wifiLink.url[0]) snprintf(label, sizeof(label), "%s  %s", wifiLink.ssid, wifiLink.url + 7);
+  else                 strlcpy(label, wifiLink.ssid[0] ? wifiLink.ssid : "no WiFi", sizeof(label));
+  const char *name = label;
   TFT_eSprite txt = TFT_eSprite(&tft);
   txt.setColorDepth(16);
   txt.setTextFont(1);
@@ -358,6 +363,121 @@ static void drawLinkStrip(TFT_eSPI &g, int ox) {
       if (c != C_BG) g.drawPixel(tx0 + (th - 1 - y), top + x, c);
     }
   txt.deleteSprite();
+}
+
+// ---------------------------------------------------------------- QR, setup, PIN
+
+// Dark modules on a white quiet zone, as phone scanners expect.
+static void drawQr(TFT_eSPI &g, int x, int y, int maxPx, const char *text) {
+  static uint8_t buf[((8 * 4 + 17) * (8 * 4 + 17) + 7) / 8];   // version 8 modules
+  QRCode qr;
+  int v = 1;
+  while (v <= 8 && qrcode_initText(&qr, buf, v, ECC_LOW, text) != 0) v++;
+  if (v > 8) return;
+  int scale = max(1, maxPx / (qr.size + 4));
+  int side = (qr.size + 4) * scale;
+  g.fillRect(x, y, side, side, TFT_WHITE);
+  for (int r = 0; r < qr.size; r++)
+    for (int c = 0; c < qr.size; c++)
+      if (qrcode_getModule(&qr, c, r))
+        g.fillRect(x + (c + 2) * scale, y + (r + 2) * scale, scale, scale, TFT_BLACK);
+}
+
+static void stepText(int x, int y, const char *num, const char *text, uint16_t col) {
+  tft.setTextFont(2);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(C_MARK);
+  tft.drawString(num, x, y);
+  tft.setTextColor(col);
+  tft.drawString(text, x + 14, y);
+}
+
+// First boot: a QR that joins the setup hotspot, and where to go next.
+void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
+  tft.fillScreen(C_BG);
+  char wifiQr[96];
+  snprintf(wifiQr, sizeof(wifiQr), "WIFI:T:WPA;S:%s;P:%s;;", apSsid, apPass);
+  drawQr(tft, 10, 40, 150, wifiQr);
+
+  drawMark(tft, 172, 12, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString("Setup", 196, 21);
+
+  const int x = 172;
+  stepText(x, 46, "1", "Scan to join", C_SOFT);
+  tft.setTextFont(1);
+  tft.setTextColor(C_DIM);
+  tft.drawString(apSsid, x + 14, 66);
+  tft.drawString(String("pw ") + apPass, x + 14, 78);
+  stepText(x, 98, "2", "Open", C_SOFT);
+  tft.setTextColor(C_TEXT);
+  tft.drawString(url, x + 14, 118);
+  tft.setTextColor(C_DIM);
+  tft.drawString("(usually opens itself)", x + 14, 130);
+  stepText(x, 150, "3", "Pick your WiFi", C_SOFT);
+
+  tft.setTextFont(1);
+  tft.setTextColor(C_FAINT);
+  tft.setTextDatum(BL_DATUM);
+  tft.drawString("Hold the screen at power-on to return here.", 10, SCR_H - 6);
+}
+
+// No accounts yet: point at the setup page on the LAN.
+static void drawEmptyScreen() {
+  tft.fillRect(0, 0, 2 * COL_W, SCR_H, C_BG);
+  const char *url = wifiLink.url[0] ? wifiLink.url : "";
+  if (url[0]) drawQr(tft, 12, 44, 136, url);
+
+  const int x = 160;
+  drawMark(tft, x, 14, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString("Add an", x + 24, 23);
+  tft.drawString("account", x + 24, 43);
+  tft.setTextFont(2);
+  tft.setTextColor(C_SOFT);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("On any device on", x, 70);
+  tft.drawString(String(wifiLink.ssid) + ", open:", x, 88);
+  tft.setTextColor(C_TEXT);
+  tft.drawString(url[0] ? url : "(joining WiFi...)", x, 112);
+  tft.setTextFont(1);
+  tft.setTextColor(C_DIM);
+  tft.drawString("or scan the code", x, 136);
+}
+
+static char pinShown[7] = "";
+
+void uiShowPin(const char *pin) {
+  strlcpy(pinShown, pin, sizeof(pinShown));
+  uiDrawAll();
+}
+
+void uiHidePin() {
+  if (!pinShown[0]) return;
+  pinShown[0] = 0;
+  uiDrawAll();
+}
+
+static void drawPinOverlay() {
+  const int w = 240, h = 120, x = (2 * COL_W - w) / 2, y = (SCR_H - h) / 2;
+  tft.fillSmoothRoundRect(x, y, w, h, 12, rgb(0x16161B), C_BG);
+  tft.drawRoundRect(x, y, w, h, 12, C_MARK);
+  tft.setTextFont(2);
+  tft.setTextColor(C_DIM);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("PIN for the setup page", x + w / 2, y + 22);
+  char spaced[12];
+  snprintf(spaced, sizeof(spaced), "%.3s %.3s", pinShown, pinShown + 3);
+  tft.setFreeFont(&FreeSansBold24pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.drawString(spaced, x + w / 2, y + 64);
+  tft.setTextFont(1);
+  tft.setTextColor(C_DIM);
+  tft.drawString("valid for 2 minutes", x + w / 2, y + h - 14);
 }
 
 // ---------------------------------------------------------------- public
@@ -411,7 +531,9 @@ static void drawScrollHints() {
 }
 
 void uiDrawAll() {
-  if (accountCount == 1) {
+  if (accountCount == 0) {
+    drawEmptyScreen();
+  } else if (accountCount == 1) {
     pushPane(0, drawWideLeft, accounts[0]);
     pushPane(COL_W, drawWideRight, accounts[0]);
   } else {
@@ -422,6 +544,7 @@ void uiDrawAll() {
   }
   if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(2 * COL_W, 0); }
   else             drawLinkStrip(tft, 2 * COL_W);
+  if (pinShown[0]) drawPinOverlay();
   uiDrawStatus();
 }
 

@@ -1,8 +1,11 @@
 # claude-status
 
 A desk display for Claude usage limits. An ESP32 "Cheap Yellow Display" shows
-the session window and per-model weekly limits for up to four Claude accounts.
-It's always on and refreshes every 15 minutes.
+the session window and per-model weekly limits for up to four Claude accounts,
+checking every 15 minutes.
+
+Set it up from your phone (join its hotspot, pick your WiFi, sign in to
+Claude in the browser) or from a Linux machine with a config file and a script.
 
 ![claude-status running on a Cheap Yellow Display](screenshots/claude-monitor.jpg)
 
@@ -35,14 +38,29 @@ on white, remove that flag.
 
 ## Requirements
 
-- Linux, with Python 3.11 or newer
-- The `claude` CLI (Claude Code), used only to create the device's logins
-- Access to the board's serial port: `sudo usermod -aG dialout $USER`, then log
-  out and back in
+- To flash the board: Linux with Python 3.11 or newer, and access to its serial
+  port (`sudo usermod -aG dialout $USER`, then log out and back in).
+  PlatformIO installs itself into `.toolchain/` on first build.
+- For the script path only: the `claude` CLI (Claude Code), used to create the
+  board's logins.
 
-PlatformIO is installed automatically into `.toolchain/` on first build.
+## Set up from your phone
 
-## Quick start
+    ./deploy_and_build.sh --web-setup
+
+1. The board starts a setup hotspot and shows a QR code. Scan it to join; the
+   hotspot password changes every boot, so joining means seeing the screen.
+2. The setup page opens by itself (or open the address on the screen). Pick
+   your WiFi, enter its password, and save. The board restarts and joins it.
+3. Reconnect your phone to that WiFi and open the address the board now shows.
+   Press **Show PIN on display**, enter the PIN, then **Add a Claude account**:
+   name it, choose model meters, tap **Open claude.ai**, approve, and paste
+   back the code claude.ai shows. Repeat for each account.
+
+Hold the screen while powering on to get back to the hotspot, for example
+after your WiFi changes.
+
+## Set up with a script
 
     ./deploy_and_build.sh            # first run creates ~/.config/claude-status/config.toml
     $EDITOR ~/.config/claude-status/config.toml
@@ -55,8 +73,22 @@ itself "DEMO - not real data". To preview the other layouts, run
 `DEMO_ACCOUNTS=1 ./deploy_and_build.sh --demo`, with any count from 1 to 4.
 
 Other options: `--build-only` validates your config and logins and compiles
-without flashing. `--monitor` tails the serial console after flashing. Set
-`PORT=/dev/ttyUSBx` to pick a specific board.
+without flashing. `--monitor` tails the serial console after flashing.
+`--erase` wipes the board first; it asks you to type ERASE, because the board
+holds the only live copy of each login. Set `PORT=/dev/ttyUSBx` to pick a
+specific board.
+
+With `enable_hosting = true` the setup page stays available on your network
+after a script deploy too, for changing settings or adding accounts. Its
+address appears on the right edge of the screen, next to the WiFi name.
+
+### Script and website together
+
+The board stores all its settings itself. A script deploy applies
+`config.toml` only when the file changed since the last deploy, so settings
+changed on the website survive a reflash. When `config.toml` does change,
+its account list replaces the board's, and accounts added only on the website
+are dropped.
 
 ## Configuration
 
@@ -69,10 +101,24 @@ without flashing. `--monitor` tails the serial console after flashing. Set
 | `device.refresh_scope` | OAuth scope the board keeps; default `user:profile` |
 | `device.timezone` | POSIX TZ string; defaults to this computer's |
 | `device.page_seconds` | with 3+ accounts, seconds per page; `0` flips only by touch. Default 12 |
+| `device.refresh_minutes` | how often to check usage. Default 15 |
+| `device.brightness` | backlight %, 5 to 100. Default 90 |
+| `device.sleep_minutes` | dim out after this long without a touch or a change; `0` never. Default 0 |
+| `device.dim_minutes` | length of that fade before the screen turns off. Default 5 |
+| `device.enable_hosting` | keep the setup page on your network. Default false |
 | `[[account]]` | one block per account, 1 to 4 |
 | `[[account]] alias` | name shown on screen |
 | `[[account]] email` | the account's email; `login.sh` refuses a sign-in as anyone else |
 | `[[account]] models` | model meters to show, e.g. `["Opus", "Fable"]`; empty shows every limit |
+
+## Screen and power
+
+- The backlight stays at `brightness` while the screen is on.
+- With `sleep_minutes` set, the screen fades over `dim_minutes` after that long
+  without a touch or a change, then turns off. New numbers, a touch, or a
+  change made on the setup page bring it back. While the screen is off, the
+  first touch only wakes it.
+- WiFi and the setup page stay up while the screen is off.
 
 ## How it works
 
@@ -102,20 +148,28 @@ its login; the board replaces its stored tokens only when that hash changes,
 i.e. after you run `login.sh` again. Rebuilding or reflashing keeps the board's
 live tokens.
 
+### Signing in on the board
+
+The setup page uses the copy-paste sign-in Claude Code offers for machines
+without a browser. The board creates a PKCE challenge, the link takes you to
+claude.ai to approve, and claude.ai shows a code that the board exchanges for
+tokens. The login belongs to the board alone. Afterwards the board reads the
+account's email and plan from the profile endpoint.
+
 ### Least privilege
 
-`claude auth login` always grants Claude Code's full scope set, including
-running models. Usage needs only `user:profile`, so the board asks for exactly
-that on every refresh. From its first refresh on, its tokens can read usage
+Signing in on the board asks for `user:profile` alone. `claude auth login`
+(the script path) always grants Claude Code's full scope set, including running
+models, so the board asks for only `user:profile` on every refresh. From its first refresh on, its tokens can read usage
 and nothing else. To confirm narrowing works for an account before you
 deploy, run `tools/scope_test.py <alias>`.
 
 ## Keeping it running
 
-- If a column reads **"Login expired: ./login.sh"**, the board's login chain
-  broke: the login was revoked, the refresh token outlived its lifetime, or the
-  board sat unplugged too long. Fix it with `./login.sh <alias>`, then
-  `./deploy_and_build.sh`.
+- If a column reads **"Login expired: sign in again"**, the board's login
+  chain broke: the login was revoked, the refresh token outlived its lifetime,
+  or the board sat unplugged too long. Press **Sign in again** on the setup
+  page, or run `./login.sh <alias>` then `./deploy_and_build.sh`.
 - Refresh tokens report a lifetime of about 30 days. The serial log prints it on
   every refresh (`refresh token valid N days`), which shows whether it resets
   each time or counts down.
@@ -130,6 +184,15 @@ deploy, run `tools/scope_test.py <alias>`.
   together with the compiled objects that embed the tokens.
 - Token values are never printed or logged, by the scripts or the firmware.
 - The board verifies TLS against pinned roots (`include/certs.h`).
+- The setup hotspot is WPA2 with a password that changes every boot and is
+  shown only on the screen.
+- On your network, any change on the setup page needs a PIN that the board
+  displays on request. It's valid for 2 minutes, five wrong guesses cancel it,
+  and a correct one signs in one browser.
+- The page is plain HTTP. The page never shows tokens, and a sign-in code is
+  useless without the PKCE verifier that stays on the board. But someone who
+  can watch your network traffic could take over the page session. On a shared
+  network, turn hosting off once setup is done.
 - Flash encryption is off, so anyone with the board in hand can read its token.
   That token is limited to `user:profile`, meaning your usage numbers. Revoke it
   from your Claude account settings if the board is lost.
@@ -141,8 +204,11 @@ deploy, run `tools/scope_test.py <alias>`.
 | `deploy_and_build.sh` | build and flash |
 | `login.sh` | create and verify the board's own Claude logins |
 | `config.example.toml` | config template |
-| `src/main.cpp` | check scheduler, backlight, redraw tick, touch scrolling |
-| `src/api.cpp` | WiFi, NTP, token refresh, usage fetch and parsing, demo data |
+| `src/main.cpp` | boot modes, check scheduler, brightness, dimming and sleep, touch |
+| `src/settings.cpp` | settings and logins in the board's flash; applies a script config |
+| `src/web.cpp` | setup hotspot, captive portal, setup page API, PIN |
+| `src/web_page.h` | the setup page itself |
+| `src/api.cpp` | WiFi, NTP, sign-in, token refresh, usage fetch and parsing, demo data |
 | `src/ui.cpp` | full-screen, side-by-side and scrolling layouts; ring, meters, WiFi strip |
 | `tools/gen_secrets.py` | config + logins → `include/secrets.h` |
 | `tools/config.py` | config loading and validation |

@@ -11,6 +11,11 @@ password = "your-wifi-password"     # "" for an open network
 hostname      = "claude-status"     # how the board appears on your network
 refresh_scope = "user:profile"      # all the usage endpoint needs; "" keeps the full login
 page_seconds  = 12                  # with 3+ accounts, flip pages this often; 0 = only by touch
+refresh_minutes = 15                # how often to check usage
+brightness    = 90                  # backlight %, 5-100
+sleep_minutes = 0                   # dim out after this long without a touch or a change; 0 = never
+dim_minutes   = 5                   # how long that fade lasts before the screen turns off
+enable_hosting = false              # serve the setup website on your network; its address shows on screen
 # timezone    = "PST8PDT,M3.2.0,M11.1.0"   # POSIX TZ; default: this computer's
 
 # One block per Claude account, 1 to 4 (3 or more scroll sideways). `alias` is what the screen shows.
