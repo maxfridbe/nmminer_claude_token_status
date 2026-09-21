@@ -10,9 +10,10 @@ password = "your-wifi-password"     # "" for an open network
 [device]
 hostname      = "claude-status"     # how the board appears on your network
 refresh_scope = "user:profile"      # all the usage endpoint needs; "" keeps the full login
+page_seconds  = 12                  # with 3+ accounts, flip pages this often; 0 = only by touch
 # timezone    = "PST8PDT,M3.2.0,M11.1.0"   # POSIX TZ; default: this computer's
 
-# One block per Claude account, at most two. `alias` is what the screen shows.
+# One block per Claude account, 1 to 4 (3 or more scroll sideways). `alias` is what the screen shows.
 # `email` is checked when you log in, so the wrong account can't slip in.
 # `models` picks the per-model meters; a model with no limit of its own shows
 # the all-models weekly limit. Leave it empty to show every limit.

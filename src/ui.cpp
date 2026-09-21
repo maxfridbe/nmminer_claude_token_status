@@ -1,7 +1,9 @@
-// Rendering: light on dark. Two columns on pure black, one per account, and
-// a narrow strip on the right edge for the WiFi link. White text; meters
-// colored green through amber to red as limits fill. Everything is composed
-// in off-screen sprites and pushed in one go, so redraws never flicker.
+// Rendering: light on dark, on pure black, with a narrow WiFi strip on the
+// right edge. One account fills the screen; two sit side by side; three or
+// more show two at a time and scroll sideways. White text; meters colored
+// green through amber to red as limits fill. Everything is composed in one
+// column-sized off-screen sprite and pushed in pieces, so redraws never
+// flicker and the wide layout needs no bigger buffer.
 
 #include "model.h"
 #include <TFT_eSPI.h>
@@ -129,18 +131,18 @@ static void drawErrorLine(TFT_eSPI &g, int cx, int y, int maxW, const char *msg)
 
 // The fill is a gradient along the meter's own color scale: a bar at 30% is
 // all green, one at 95% runs green through amber into red.
-static void drawBar(TFT_eSPI &g, int x, int y, int w, float pct, bool stale) {
-  const int r = BAR_H / 2;
-  g.fillSmoothRoundRect(x, y, w, BAR_H, r, C_TRACK, C_BG);
+static void drawBar(TFT_eSPI &g, int x, int y, int w, int h, float pct, bool stale) {
+  const int r = h / 2;
+  g.fillSmoothRoundRect(x, y, w, h, r, C_TRACK, C_BG);
   int fw = (int)(w * pct / 100.0f + 0.5f);
   if (pct <= 0 || fw <= 0) return;
-  if (fw < BAR_H) fw = BAR_H;
+  if (fw < h) fw = h;
 
   uint16_t c0 = stale ? C_FAINT : meterColor(0);
   uint16_t c1 = stale ? C_FAINT : meterColor(pct);
   g.fillSmoothCircle(x + r, y + r, r, c0, C_TRACK);
   g.fillSmoothCircle(x + fw - 1 - r, y + r, r, c1, C_TRACK);
-  if (fw - 2 * r > 0) g.fillRectHGradient(x + r, y, fw - 2 * r, BAR_H, c0, c1);
+  if (fw - 2 * r > 0) g.fillRectHGradient(x + r, y, fw - 2 * r, h, c0, c1);
 }
 
 // Model name and reset time on top, meter with percentage beneath.
@@ -175,70 +177,78 @@ static void drawRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale) {
   snprintf(pct, sizeof(pct), "%d%%", (int)(b.util + 0.5f));
   g.setFreeFont(&FreeSansBold9pt7b);
   int pw = g.textWidth("100%");
-  drawBar(g, x0, y + 19, x1 - x0 - pw - 6, b.util, stale);
+  drawBar(g, x0, y + 19, x1 - x0 - pw - 6, BAR_H, b.util, stale);
   g.setTextColor(stale ? C_DIM : C_TEXT);
   g.setTextDatum(MR_DATUM);
   g.drawString(pct, x1, y + 23);
 }
 
-static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
-  const int cx = ox + COL_W / 2;
-  const bool stale = !a.ok && a.everOk;
+static const Bucket *sessionOf(const Account &a) {
+  return (a.everOk && a.nBuckets && !strcmp(a.buckets[0].label, "Session")) ? &a.buckets[0] : nullptr;
+}
 
-  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
-  if (ruleRight) g.drawFastVLine(ox + COL_W - 1, 14, SCR_H - 28, C_RULE);
-
-  // Name with the mark, plan beneath.
+// Mark and name, plan beneath.
+static void drawHeader(TFT_eSPI &g, int ox, const Account &a, int maxW) {
   drawMark(g, ox + PAD, NAME_Y - 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
   g.setFreeFont(&FreeSansBold9pt7b);
   g.setTextColor(C_TEXT);
   g.setTextDatum(ML_DATUM);
-  g.drawString(fit(g, a.label, COL_W - PAD * 2 - 24), ox + PAD + 24, NAME_Y);
+  g.drawString(fit(g, a.label, maxW - PAD * 2 - 24), ox + PAD + 24, NAME_Y);
   g.setTextFont(2);
   g.setTextColor(C_DIM);
   g.drawString(a.plan, ox + PAD + 24, PLAN_Y);
+}
 
-  // Session ring
-  const Bucket *s = (a.everOk && a.nBuckets && !strcmp(a.buckets[0].label, "Session"))
-                        ? &a.buckets[0] : nullptr;
-  g.drawSmoothArc(cx, RING_CY, RING_R, RING_IR, RING_A0, RING_A1, C_TRACK, C_BG, true);
+static void drawRing(TFT_eSPI &g, int cx, int cy, int r, int ir, const Bucket *s, bool stale,
+                     const GFXfont *font, int labelDy) {
+  g.drawSmoothArc(cx, cy, r, ir, RING_A0, RING_A1, C_TRACK, C_BG, true);
   if (s) {
     int end = RING_A0 + (int)((RING_A1 - RING_A0) * s->util / 100.0f + 0.5f);
     if (end > RING_A0 + 1)
-      g.drawSmoothArc(cx, RING_CY, RING_R, RING_IR, RING_A0, end,
-                      stale ? C_FAINT : meterColor(s->util), C_BG, true);
+      g.drawSmoothArc(cx, cy, r, ir, RING_A0, end, stale ? C_FAINT : meterColor(s->util), C_BG, true);
   }
   char pct[8];
   if (s) snprintf(pct, sizeof(pct), "%d%%", (int)(s->util + 0.5f));
   else   snprintf(pct, sizeof(pct), "--");
-  g.setFreeFont(&FreeSansBold18pt7b);
+  g.setFreeFont(font);
   g.setTextColor(s && !stale ? C_TEXT : C_FAINT);
   g.setTextDatum(MC_DATUM);
-  g.drawString(pct, cx, RING_CY - 6);
+  g.drawString(pct, cx, cy - 6);
   g.setTextFont(2);
   g.setTextColor(C_DIM);
-  g.drawString("session", cx, RING_CY + 17);
+  g.drawString("session", cx, cy + labelDy);
+}
 
-  // Under the ring: when the session resets, or what went wrong.
-  if (!a.ok && a.error[0]) {
-    drawErrorLine(g, cx, RESET_Y, COL_W - PAD * 2, a.error);
-  } else if (s) {
-    char rs[20];
-    fmtReset(s->resetsAt, false, rs, sizeof(rs));
-    if (rs[0]) {
-      const char *pre = strcmp(rs, "now") ? "resets in " : "resets ";
-      g.setTextFont(2);
-      int w1 = g.textWidth(pre), w2 = g.textWidth(rs);
-      int x = cx - (w1 + w2) / 2;
-      g.setTextDatum(ML_DATUM);
-      g.setTextColor(C_DIM);
-      g.drawString(pre, x, RESET_Y);
-      g.setTextColor(C_SOFT);
-      g.drawString(rs, x + w1, RESET_Y);
-    }
-  }
+// When the session resets, or what went wrong.
+static void drawResetLine(TFT_eSPI &g, int cx, int y, int maxW, const Account &a, const Bucket *s) {
+  if (!a.ok && a.error[0]) { drawErrorLine(g, cx, y, maxW, a.error); return; }
+  if (!s) return;
+  char rs[20];
+  fmtReset(s->resetsAt, false, rs, sizeof(rs));
+  if (!rs[0]) return;
+  const char *pre = strcmp(rs, "now") ? "resets in " : "resets ";
+  g.setTextFont(2);
+  int w1 = g.textWidth(pre), w2 = g.textWidth(rs);
+  int x = cx - (w1 + w2) / 2;
+  g.setTextDatum(ML_DATUM);
+  g.setTextColor(C_DIM);
+  g.drawString(pre, x, y);
+  g.setTextColor(C_SOFT);
+  g.drawString(rs, x + w1, y);
+}
 
-  // Model meters
+static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
+  const int cx = ox + COL_W / 2;
+  const bool stale = !a.ok && a.everOk;
+  const Bucket *s = sessionOf(a);
+
+  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
+  if (ruleRight) g.drawFastVLine(ox + COL_W - 1, 14, SCR_H - 28, C_RULE);
+
+  drawHeader(g, ox, a, COL_W);
+  drawRing(g, cx, RING_CY, RING_R, RING_IR, s, stale, &FreeSansBold18pt7b, 17);
+  drawResetLine(g, cx, RESET_Y, COL_W - PAD * 2, a, s);
+
   int first = s ? 1 : 0;
   int no = a.everOk ? a.nBuckets - first : 0;
   int shown = no <= MAX_ROWS ? no : MAX_ROWS - 1;
@@ -252,6 +262,65 @@ static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
     g.setTextDatum(TL_DATUM);
     g.drawString(more, ox + PAD, ROW_Y0 + shown * ROW_H);
   }
+}
+
+// ---------------------------------------------------------------- single account
+
+// One account uses the whole screen, drawn as two column-sized panes: a big
+// session ring on the left, roomier model meters on the right.
+#define WIDE_RING_CY 124
+#define WIDE_RING_R  60
+#define WIDE_RING_IR 46
+#define WIDE_RESET_Y 208
+#define WIDE_ROW_Y0  26
+#define WIDE_ROW_H   50
+#define WIDE_ROWS    4
+#define WIDE_BAR_H   11
+
+static void drawWideLeft(TFT_eSPI &g, int ox, const Account &a) {
+  const bool stale = !a.ok && a.everOk;
+  const Bucket *s = sessionOf(a);
+  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
+  drawHeader(g, ox, a, COL_W);
+  drawRing(g, ox + COL_W / 2, WIDE_RING_CY, WIDE_RING_R, WIDE_RING_IR, s, stale, &FreeSansBold24pt7b, 26);
+  drawResetLine(g, ox + COL_W / 2, WIDE_RESET_Y, COL_W - PAD, a, s);
+}
+
+static void drawWideRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale) {
+  const int x0 = ox + 6, x1 = ox + COL_W - PAD;
+
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%d%%", (int)(b.util + 0.5f));
+  g.setFreeFont(&FreeSansBold12pt7b);
+  g.setTextColor(stale ? C_DIM : C_TEXT);
+  g.setTextDatum(MR_DATUM);
+  g.drawString(pct, x1, y + 8);
+  int pw = g.textWidth(pct);
+
+  g.setTextFont(2);
+  g.setTextDatum(ML_DATUM);
+  g.setTextColor(stale ? C_DIM : C_SOFT);
+  g.drawString(fit(g, b.label, x1 - x0 - pw - 8), x0, y + 8);
+
+  drawBar(g, x0, y + 22, x1 - x0, WIDE_BAR_H, b.util, stale);
+
+  char rs[16], note[32];
+  fmtReset(b.resetsAt, false, rs, sizeof(rs));
+  snprintf(note, sizeof(note), "%s%s%s%s", b.shared ? "shared" : "",
+           b.shared && rs[0] ? "  -  " : "", rs[0] ? "resets " : "", rs);
+  g.setTextFont(1);
+  g.setTextColor(C_DIM);
+  g.setTextDatum(TL_DATUM);
+  g.drawString(fit(g, note, x1 - x0), x0, y + 38);
+}
+
+static void drawWideRight(TFT_eSPI &g, int ox, const Account &a) {
+  const bool stale = !a.ok && a.everOk;
+  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
+  int first = sessionOf(a) ? 1 : 0;
+  int no = a.everOk ? a.nBuckets - first : 0;
+  for (int r = 0; r < no && r < WIDE_ROWS; r++)
+    drawWideRow(g, ox, WIDE_ROW_Y0 + r * WIDE_ROW_H, a.buckets[first + r], stale);
 }
 
 // ---------------------------------------------------------------- link strip
@@ -299,16 +368,57 @@ void uiDrawStatus() {
   tft.fillSmoothCircle(2 * COL_W - 8, 7, 3, c, C_BG);
 }
 
+// With three or more accounts, two show at a time; this is the left one.
+static int firstVisible = 0;
+
+bool uiScroll(int delta) {
+  if (accountCount < 3) return false;
+  int next = constrain(firstVisible + delta, 0, accountCount - 2);
+  if (next == firstVisible) return false;
+  firstVisible = next;
+  return true;
+}
+
+// Next page, wrapping from the last back to the first.
+bool uiNextPage() {
+  if (accountCount < 3) return false;
+  firstVisible = firstVisible + 2 < accountCount ? firstVisible + 1 : 0;
+  return true;
+}
+
+// Paint one column-sized pane via the sprite, or straight to the panel.
+static void pushPane(int x, void (*draw)(TFT_eSPI &, int, const Account &), const Account &a) {
+  if (haveColSpr) { draw(colSpr, 0, a); colSpr.pushSprite(x, 0); }
+  else            draw(tft, x, a);
+}
+static void columnWithRule(TFT_eSPI &g, int ox, const Account &a) { drawColumn(g, ox, a, true); }
+static void columnPlain(TFT_eSPI &g, int ox, const Account &a)    { drawColumn(g, ox, a, false); }
+
+// Dots for every account (the visible pair lit) and arrows at the edges
+// that have more beyond them.
+static void drawScrollHints() {
+  const int y = SCR_H - 5, gap = 10;
+  int x = COL_W - (accountCount - 1) * gap / 2;
+  for (int i = 0; i < accountCount; i++, x += gap) {
+    bool lit = i == firstVisible || i == firstVisible + 1;
+    tft.fillSmoothCircle(x, y, lit ? 2 : 1, lit ? C_SOFT : C_FAINT, C_BG);
+  }
+  const int my = SCR_H / 2;
+  if (firstVisible > 0)
+    tft.fillTriangle(1, my, 5, my - 5, 5, my + 5, C_DIM);
+  if (firstVisible + 2 < accountCount)
+    tft.fillTriangle(2 * COL_W - 2, my, 2 * COL_W - 6, my - 5, 2 * COL_W - 6, my + 5, C_DIM);
+}
+
 void uiDrawAll() {
-  for (int i = 0; i < accountCount; i++) {
-    int x = accountCount == 1 ? (2 * COL_W - COL_W) / 2 : i * COL_W;
-    bool rule = accountCount > 1 && i == 0;
-    if (haveColSpr) {
-      drawColumn(colSpr, 0, accounts[i], rule);
-      colSpr.pushSprite(x, 0);
-    } else {
-      drawColumn(tft, x, accounts[i], rule);
-    }
+  if (accountCount == 1) {
+    pushPane(0, drawWideLeft, accounts[0]);
+    pushPane(COL_W, drawWideRight, accounts[0]);
+  } else {
+    firstVisible = constrain(firstVisible, 0, max(0, accountCount - 2));
+    pushPane(0, columnWithRule, accounts[firstVisible]);
+    pushPane(COL_W, columnPlain, accounts[firstVisible + 1]);
+    if (accountCount > 2) drawScrollHints();
   }
   if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(2 * COL_W, 0); }
   else             drawLinkStrip(tft, 2 * COL_W);

@@ -1,23 +1,10 @@
 # claude-status
 
 A desk display for Claude usage limits. An ESP32 "Cheap Yellow Display" shows
-the session window and per-model weekly limits for up to two Claude accounts.
+the session window and per-model weekly limits for up to four Claude accounts.
 It's always on and refreshes every 15 minutes.
 
-```
-┌──────────────────────┬──────────────────────┬─┐
-│ ✳ personal           │ ✳ work               │K│
-│   PRO                │   MAX 5x             │L│▐
-│       ╭────╮         │       ╭────╮         │ │▐
-│      │ 54% │         │      │  6% │         │ │▐
-│       ╰────╯         │       ╰────╯         │ │▐
-│    resets in 2h 14m  │    resets in 47m     │ │▐
-│ Opus  shared  Wed 9p │ Opus  shared  Thu 5a │ │▐
-│ ▰▰▰▰▰▰▰▰▱▱▱▱   75%   │ ▰▱▱▱▱▱▱▱▱▱▱▱    7%   │ │▐
-│                      │ Fable         Thu 5a │ │▐
-│                      │ ▰▱▱▱▱▱▱▱▱▱▱▱    9%   │ │▐
-└──────────────────────┴──────────────────────┴─┘
-```
+![claude-status running on a Cheap Yellow Display](screenshots/claude-monitor.jpg)
 
 - **Ring**: the 5-hour session window, % used, with time until reset.
 - **Meters**: the models you choose per account. A model with no limit of its
@@ -28,6 +15,14 @@ It's always on and refreshes every 15 minutes.
 - **Right edge**: the WiFi name, written vertically, next to a live signal meter.
 - A small blue dot shows while a check is running. A failed account keeps its
   last numbers, greyed out, with the error under the ring.
+
+The layout follows the number of accounts:
+
+| Accounts | Layout |
+|---|---|
+| 1 | Fills the screen: a big session ring on the left, up to four model meters on the right |
+| 2 | Side by side, as in the photo |
+| 3–4 | Two at a time, flipping to the next page every 12 seconds (`page_seconds`). Swipe sideways, or tap near an edge, to scroll by hand; the timer restarts after a manual scroll. Dots at the bottom and arrows at the edges show where you are |
 
 ## Hardware
 
@@ -56,7 +51,8 @@ PlatformIO is installed automatically into `.toolchain/` on first build.
 
 To try the screen without an account or network, run
 `./deploy_and_build.sh --demo`. The demo shows made-up numbers and labels
-itself "DEMO - not real data".
+itself "DEMO - not real data". To preview the other layouts, run
+`DEMO_ACCOUNTS=1 ./deploy_and_build.sh --demo`, with any count from 1 to 4.
 
 Other options: `--build-only` validates your config and logins and compiles
 without flashing. `--monitor` tails the serial console after flashing. Set
@@ -72,6 +68,8 @@ without flashing. `--monitor` tails the serial console after flashing. Set
 | `device.hostname` | how the board appears on your network |
 | `device.refresh_scope` | OAuth scope the board keeps; default `user:profile` |
 | `device.timezone` | POSIX TZ string; defaults to this computer's |
+| `device.page_seconds` | with 3+ accounts, seconds per page; `0` flips only by touch. Default 12 |
+| `[[account]]` | one block per account, 1 to 4 |
 | `[[account]] alias` | name shown on screen |
 | `[[account]] email` | the account's email; `login.sh` refuses a sign-in as anyone else |
 | `[[account]] models` | model meters to show, e.g. `["Opus", "Fable"]`; empty shows every limit |
@@ -143,14 +141,15 @@ deploy, run `tools/scope_test.py <alias>`.
 | `deploy_and_build.sh` | build and flash |
 | `login.sh` | create and verify the board's own Claude logins |
 | `config.example.toml` | config template |
-| `src/main.cpp` | check scheduler, backlight, redraw tick |
+| `src/main.cpp` | check scheduler, backlight, redraw tick, touch scrolling |
 | `src/api.cpp` | WiFi, NTP, token refresh, usage fetch and parsing, demo data |
-| `src/ui.cpp` | columns, ring, gradient meters, WiFi strip |
+| `src/ui.cpp` | full-screen, side-by-side and scrolling layouts; ring, meters, WiFi strip |
 | `tools/gen_secrets.py` | config + logins → `include/secrets.h` |
 | `tools/config.py` | config loading and validation |
 | `tools/scope_test.py` | checks that a login can be narrowed to `user:profile` |
 | `tools/svg_to_alpha.py` | rasterizes `assets/claude-mark.svg` into `include/claude_mark.h` |
 | `include/certs.h` | pinned root CAs for the two TLS endpoints |
+| `screenshots/` | photos for this README |
 
 ## Caveats
 

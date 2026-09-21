@@ -11,7 +11,7 @@ DEFAULT_DIR = os.environ.get("CLAUDE_STATUS_CONFIG_DIR",
 
 # Claude Code's production OAuth client, as used by its own token refresh.
 CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-MAX_ACCOUNTS = 2
+MAX_ACCOUNTS = 4   # 3 or more scroll sideways on the board
 
 
 class ConfigError(Exception):
@@ -36,6 +36,9 @@ def load(path=None):
     if not ssid:
         raise ConfigError("[wifi] ssid is required")
     hostname = dev.get("hostname", "claude-status")
+    page_seconds = dev.get("page_seconds", 12)
+    if not isinstance(page_seconds, int) or page_seconds < 0:
+        raise ConfigError("[device] page_seconds must be a whole number of seconds, 0 to disable")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,31}", hostname):
         raise ConfigError(f"[device] hostname '{hostname}': letters, digits and '-' only, max 32")
 
@@ -62,6 +65,7 @@ def load(path=None):
         "ssid": ssid,
         "password": wifi.get("password", ""),
         "hostname": hostname,
+        "page_seconds": page_seconds,
         "refresh_scope": dev.get("refresh_scope", "user:profile"),
         "timezone": dev.get("timezone", ""),
         "client_id": dev.get("oauth_client_id", CLAUDE_CODE_CLIENT_ID),

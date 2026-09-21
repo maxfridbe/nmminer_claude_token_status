@@ -123,6 +123,7 @@ def main():
 #define DEVICE_HOSTNAME  {c_str(cfg["hostname"])}
 #define OAUTH_CLIENT_ID  {c_str(cfg["client_id"])}
 #define TZ_POSIX         {c_str(cfg["timezone"] or system_tz())}
+#define PAGE_SECONDS     {cfg["page_seconds"]}
 
 #define ACCOUNT_COUNT {len(rows)}
 static const char* const ACCT_LABEL[]      = {arr("label")};

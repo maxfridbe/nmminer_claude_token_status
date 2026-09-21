@@ -408,10 +408,14 @@ void apiCheckAll() {
 
 #else  // DEMO_DATA ------------------------------------------------------------
 
-// Offline stand-in shaped like the real display: a session ring, Opus for the
-// Pro account (shared weekly), Opus + Fable for Max. Values change on every
-// other check so both the changed and unchanged paths run.
+// Offline stand-in shaped like the real display. DEMO_ACCOUNTS (1-4) picks how
+// many accounts to fake, to preview the full-screen, side-by-side and
+// scrolling layouts. Values change on every other check.
 #include <sys/time.h>
+
+#ifndef DEMO_ACCOUNTS
+#define DEMO_ACCOUNTS 2
+#endif
 
 static int demoTick = 0;
 
@@ -429,15 +433,17 @@ void apiInit() {
   struct timeval tv = { 1790000000, 0 };
   settimeofday(&tv, nullptr);
 
-  accountCount = 2;
-  strlcpy(accounts[0].label, "personal", sizeof(accounts[0].label));
-  strlcpy(accounts[0].plan, "PRO", sizeof(accounts[0].plan));
-  strlcpy(accounts[1].label, "work", sizeof(accounts[1].label));
-  strlcpy(accounts[1].plan, "MAX 5x", sizeof(accounts[1].plan));
+  static const char *LABELS[] = {"personal", "work", "team", "lab"};
+  static const char *PLANS[]  = {"PRO", "MAX 5x", "MAX 20x", "PRO"};
+  accountCount = constrain(DEMO_ACCOUNTS, 1, MAX_ACCOUNTS);
+  for (int i = 0; i < accountCount; i++) {
+    strlcpy(accounts[i].label, LABELS[i], sizeof(accounts[i].label));
+    strlcpy(accounts[i].plan, PLANS[i], sizeof(accounts[i].plan));
+  }
   strlcpy(wifiLink.ssid, "DEMO - not real data", sizeof(wifiLink.ssid));
   wifiLink.rssi = -52;
   wifiLink.up = true;
-  Serial.println("[demo] offline demo data, no network");
+  Serial.printf("[demo] %d account(s), offline demo data, no network\n", accountCount);
 }
 
 void apiPollLink() {}
@@ -449,22 +455,18 @@ void apiCheckAll() {
 
   int step = demoTick / 2;
   static time_t base = time(nullptr);   // anchor so resets don't drift per check
-
-  Account &p = accounts[0];
-  p.nBuckets = 0;
-  demoBucket(p, "Session", fmodf(25 + step * 17, 100), base + 2 * 3600 + 14 * 60 + step * 600, false);
-  demoBucket(p, "Opus",    fminf(71 + step * 4, 100),  base + 2 * 86400 + 11 * 3600, true);
-
-  Account &m = accounts[1];
-  m.nBuckets = 0;
-  demoBucket(m, "Session", fmodf(62 + step * 11, 100), base + 47 * 60 + step * 600, false);
-  demoBucket(m, "Opus",    fminf(38 + step * 3, 100),  base + 4 * 86400 + 5 * 3600, true);
-  demoBucket(m, "Fable",   fminf(88 + step * 2, 100),  base + 4 * 86400 + 5 * 3600, false);
+  const time_t week = base + 2 * 86400 + 11 * 3600;
 
   for (int i = 0; i < accountCount; i++) {
-    accounts[i].ok = accounts[i].everOk = true;
-    accounts[i].error[0] = 0;
-    accounts[i].fetchedAt = time(nullptr);
+    Account &a = accounts[i];
+    a.nBuckets = 0;
+    demoBucket(a, "Session", fmodf(25 + i * 23 + step * 17, 100), base + (47 + i * 70) * 60 + step * 600, false);
+    demoBucket(a, "Opus", fminf(71 - i * 20 + step * 4, 100), week, i != 2);
+    if (i >= 1) demoBucket(a, "Fable",  fminf(9 + i * 30 + step * 2, 100), week + 86400, false);
+    if (i == 2) demoBucket(a, "Sonnet", fminf(44 + step * 3, 100), week, false);
+    a.ok = a.everOk = true;
+    a.error[0] = 0;
+    a.fetchedAt = time(nullptr);
   }
   networkDown = false;
   lastGoodCheck = time(nullptr);

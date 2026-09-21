@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <time.h>
 
-#define MAX_ACCOUNTS 2
+#define MAX_ACCOUNTS 4   // 3+ scroll sideways, two at a time
 #define MAX_BUCKETS  6
 
 // One usage meter to display. Bucket 0 is the session window when present;
@@ -53,3 +53,5 @@ void   uiInit();
 void   uiSplash(const char* status);
 void   uiDrawAll();
 void   uiDrawStatus();
+bool   uiScroll(int delta);   // with 3+ accounts: +1 right, -1 left; true if it moved
+bool   uiNextPage();          // with 3+ accounts: advance one page, wrapping around

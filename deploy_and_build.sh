@@ -5,6 +5,7 @@
 #   ./deploy_and_build.sh --build-only  validate config and logins, compile, don't flash
 #   ./deploy_and_build.sh --monitor     flash, then tail the serial console
 #   ./deploy_and_build.sh --demo        offline demo: no config, logins or network
+#   DEMO_ACCOUNTS=3 ./deploy_and_build.sh --demo   preview the layout for 1-4 accounts
 #
 # Config and device logins live in ~/.config/claude-status/ (override with
 # CLAUDE_STATUS_CONFIG_DIR). Tokens are written to include/secrets.h only for
@@ -29,12 +30,16 @@ for arg in "$@"; do
     --build-only) BUILD_ONLY=1 ;;
     --demo)       DEMO=1 ;;
     --monitor|-m) MONITOR=1 ;;
-    -h|--help)    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown option: $arg (try --help)" ;;
   esac
 done
 ENV_NAME=cyd
-[[ $DEMO -eq 1 ]] && ENV_NAME=cyd-demo
+if [[ $DEMO -eq 1 ]]; then
+  ENV_NAME=cyd-demo
+  # Demo builds must rebuild when the account count changes.
+  export PLATFORMIO_BUILD_FLAGS="-D DEMO_ACCOUNTS=${DEMO_ACCOUNTS:-2}"
+fi
 
 # --- toolchain: PlatformIO in a local venv, nothing installed system-wide
 if [[ ! -x "$PIO" ]]; then
