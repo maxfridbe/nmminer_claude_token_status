@@ -11,3 +11,7 @@ config.toml
 *.credentials.json
 .credentials.json
 verified-email
+
+# Firmware images: published as GitHub releases, downloaded by flashonly.sh
+firmware/
+.flashtool/

@@ -36,17 +36,25 @@ Some units power up with inverted colors. This build sends `INVON` to correct
 them (`TFT_INVERSION_ON` in `platformio.ini`). If your screen shows black text
 on white, remove that flag.
 
-## Requirements
+## Get started
 
-- To flash the board: Linux with Python 3.11 or newer, and access to its serial
-  port (`sudo usermod -aG dialout $USER`, then log out and back in).
-  PlatformIO installs itself into `.toolchain/` on first build.
-- For the script path only: the `claude` CLI (Claude Code), used to create the
-  board's logins.
+You need the board, a USB data cable, and a Linux machine with Python 3 and
+`curl`. Nothing to configure first.
+
+    ./flashonly.sh
+
+It lists the USB serial devices it finds, lets you pick the board, downloads
+the latest release, checks its checksum, and flashes it. A board that was
+already set up keeps its WiFi, accounts and logins. If `flashonly.sh` can't
+open the port: `sudo usermod -aG dialout $USER`, then log out and back in.
+
+Then finish on the board, as described next. Prefer esptool directly? On a
+*fresh* board, `esptool --chip esp32 write-flash 0x0 claude-status.bin` with
+the image from the [releases page](../../releases). Don't do that on a board
+you've set up: the image's padding covers the settings area. `flashonly.sh`
+writes around it.
 
 ## Set up on the board
-
-    ./deploy_and_build.sh --web-setup
 
 1. **WiFi.** The board shows a setup screen. Tap **Use this screen**, pick your
    network and type its password on the on-screen keyboard. Or scan the QR
@@ -80,7 +88,17 @@ Changing WiFi never touches accounts or logins. A new network is tested before
 it's saved, and cancelling keeps the old one. If the old network is gone and
 the board can't show its menu over it, hold the screen while powering on.
 
-## Set up with a script
+## Build from source
+
+For changing the firmware, or for setting a board up from a config file
+instead of on its screen. Needs Python 3.11+; PlatformIO installs itself into
+`.toolchain/` on first build.
+
+    ./deploy_and_build.sh --web-setup   # build and flash the generic firmware
+
+### Set up with a config file
+
+Needs the `claude` CLI (Claude Code) to create the board's logins.
 
     ./deploy_and_build.sh            # first run creates ~/.config/claude-status/config.toml
     $EDITOR ~/.config/claude-status/config.toml
@@ -222,7 +240,10 @@ deploy, run `tools/scope_test.py <alias>`.
 
 | Path | Purpose |
 |---|---|
-| `deploy_and_build.sh` | build and flash |
+| `flashonly.sh` | pick a USB device, flash the latest release (keeps the board's settings) |
+| `deploy_and_build.sh` | build from source and flash, from a config file or generic |
+| `tools/make_release.sh` | builds the generic image, `firmware/claude-status.bin` |
+| `.github/workflows/release.yml` | builds that image on GitHub and publishes it for each `v*` tag |
 | `login.sh` | create and verify the board's own Claude logins |
 | `config.example.toml` | config template |
 | `src/main.cpp` | boot modes, check scheduler, brightness, dimming and sleep, touch, menu |
@@ -238,6 +259,12 @@ deploy, run `tools/scope_test.py <alias>`.
 | `tools/svg_to_alpha.py` | rasterizes `assets/claude-mark.svg` into `include/claude_mark.h` |
 | `include/certs.h` | pinned root CAs for the two TLS endpoints |
 | `screenshots/` | photos for this README |
+
+## Releases
+
+GitHub Actions builds the generic firmware for every `v*` tag and attaches
+`claude-status.bin` and its checksum to a release. It also checks that the
+image embeds no credentials. To cut one: `git tag v1.2.3 && git push origin v1.2.3`.
 
 ## Caveats
 

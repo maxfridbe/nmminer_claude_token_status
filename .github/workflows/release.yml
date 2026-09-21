@@ -1,0 +1,58 @@
+# Builds the generic firmware (no config: the board sets itself up on its
+# touchscreen) and, for a version tag, publishes it as a GitHub release that
+# flashonly.sh downloads.
+name: Firmware release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: |
+          python -m venv .toolchain
+          .toolchain/bin/pip install --quiet platformio
+
+      - name: Build firmware image
+        run: tools/make_release.sh
+
+      - name: Check the image embeds no config or credentials
+        run: |
+          test ! -e include/secrets.h
+          if strings -n 6 firmware/claude-status.bin | grep -E 'sk-ant-|oat01-|ort01-'; then
+            echo "Token-like strings in the image"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-status-firmware
+          path: firmware/
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            firmware/claude-status.bin firmware/claude-status.bin.sha256 \
+            --title "claude-status $GITHUB_REF_NAME" \
+            --notes "Generic firmware for the ESP32-2432S028 (Cheap Yellow Display). Flash it with ./flashonly.sh, or with esptool at offset 0x0, then set up on the board: WiFi on the touchscreen, Claude accounts from your phone. See the README." \
+            --generate-notes
