@@ -196,10 +196,13 @@ static const Bucket *sessionOf(const Account &a) {
 // Mark and name, plan beneath.
 static void drawHeader(TFT_eSPI &g, int ox, const Account &a, int maxW) {
   drawMark(g, ox + PAD, NAME_Y - 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  // Long names drop to the smaller font before anything gets cut off.
+  const int nameW = maxW - PAD * 2 - 24;
   g.setFreeFont(&FreeSansBold9pt7b);
+  if (g.textWidth(a.label) > nameW) g.setTextFont(2);
   g.setTextColor(C_TEXT);
   g.setTextDatum(ML_DATUM);
-  g.drawString(fit(g, a.label, maxW - PAD * 2 - 24), ox + PAD + 24, NAME_Y);
+  g.drawString(fit(g, a.label, nameW), ox + PAD + 24, NAME_Y);
   g.setTextFont(2);
   g.setTextColor(C_DIM);
   g.drawString(a.plan, ox + PAD + 24, PLAN_Y);

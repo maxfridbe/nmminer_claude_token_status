@@ -42,7 +42,7 @@
 - [ ] **License.** The repo is public with none, so others can't reuse the code.
 - [ ] **Screenshot.** It shows real aliases and the WiFi name.
 - [ ] **Claude mark** in a public repo (Anthropic trademark).
-- [ ] **Long names** truncate (a 13-letter alias shows 9 letters and "~"). Shrink the font instead?
+- [x] **Long names** drop to a smaller font before truncating (v26.09.03).
 
 ## Ideas
 
