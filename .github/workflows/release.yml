@@ -1,11 +1,12 @@
-# Builds the generic firmware (no config: the board sets itself up on its
-# touchscreen) and, for a version tag, publishes it as a GitHub release that
-# flashonly.sh downloads.
+# Builds the generic firmware for every board (no config: boards set
+# themselves up on screen) on each push to main, and for a version tag also
+# publishes it as the GitHub release that flashonly.sh and on-device updates use.
 name: Firmware release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]      # every push: build all boards, attach them to the run
+    tags: ["v*"]          # a version tag: also publish a release
   workflow_dispatch:
 
 permissions:
@@ -48,7 +49,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-status-firmware
+          name: claude-status-firmware-${{ github.ref_name }}
           path: firmware/
 
       - name: Publish release

@@ -1,8 +1,9 @@
 # claude-status
 
-A desk display for Claude usage limits. An ESP32 "Cheap Yellow Display" shows
-the session window and per-model weekly limits for up to four Claude accounts,
-checking every 15 minutes.
+A desk display for Claude usage limits on NMMiner-style ESP32 boards: the 2.8"
+"Cheap Yellow Display" touchscreen, or the 1.54" NM-TV with a single touch
+button. It shows the session window and per-model weekly limits for up to four
+Claude accounts, checking every 15 minutes.
 
 Set it up on the touchscreen and your phone (join its hotspot, sign in to
 Claude in the browser), or from a Linux machine with a config file and a script.
@@ -45,16 +46,34 @@ Some CYD units power up with inverted colors. This build sends `INVON` to correc
 them (`TFT_INVERSION_ON` in `platformio.ini`). If your screen shows black text
 on white, remove that flag.
 
-### NM-TV differences
+### NM-TV: the non-touchscreen option
 
-- One account per page on the square screen; pages flip on the timer, or tap
-  the button for the next one. Hold the button for the menu, then tap to move
-  the highlight and hold to pick.
-- No on-screen keyboard, so WiFi is set up from a phone (**WiFi with a phone**
-  in the menu, or the setup hotspot on first boot).
-- The button's pin isn't published. `pio run -e nmtv-probe -t upload`, then
-  watch the serial monitor while touching it; set `BUTTON_PIN` (and
-  `BUTTON_TOUCHPAD`) in `src/board.h` from what it reports.
+The NM-TV is NMMiner's 1.54" "small TV": the same ESP32 as the CYD, a square
+240x240 screen, and a single touch button on top instead of a touchscreen.
+Everything the CYD does works on it, driven by that one button:
+
+| Where | Tap | Hold (1.5 s) |
+|---|---|---|
+| Dashboard | next account | open the menu |
+| Menu | move the highlight | pick the highlighted item |
+| Update screen, Versions list | move the highlight | pick it |
+| Setup / hotspot screens | close | |
+
+- The square screen shows one account per page: name and plan, the session
+  ring, the week bar, and up to two model meters. With several accounts, pages
+  also flip on the `page_seconds` timer.
+- There's no on-screen keyboard, so WiFi is always set up from a phone: the
+  setup hotspot on first boot, or **WiFi with a phone** in the menu. Adding
+  accounts works exactly as on the CYD, from the phone page.
+- Flash it with `./flashonly.sh --board nmtv`. Updates over the air fetch
+  `claude-status-nmtv-app.bin`.
+
+**Not yet tested on the hardware.** It's built from NMTech's published pins
+(display on GPIO 13/14/15/2, backlight GPIO 19 lit by a low level, panel power
+GPIO 21). The button's pin isn't published: flash `pio run -e nmtv-probe -t
+upload`, watch the serial monitor while touching it, and set `BUTTON_PIN` (and
+`BUTTON_TOUCHPAD`) in `src/board.h` from what it reports. See `TODO.md` for the
+rest of the bring-up list.
 
 ## Get started
 
