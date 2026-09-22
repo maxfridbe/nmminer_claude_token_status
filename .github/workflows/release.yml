@@ -32,6 +32,17 @@ jobs:
           python -m venv .toolchain
           .toolchain/bin/pip install --quiet platformio
 
+      # PlatformIO's package servers occasionally reset connections; fetch
+      # everything first, with retries, so the build itself never downloads.
+      - name: Fetch toolchains and libraries
+        run: |
+          for attempt in 1 2 3; do
+            .toolchain/bin/pio pkg install -e cyd -e nmtv && exit 0
+            echo "Fetch attempt $attempt failed; retrying"
+            sleep $((attempt * 20))
+          done
+          exit 1
+
       - name: Build firmware image
         env:
           FW_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
