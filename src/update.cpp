@@ -6,6 +6,8 @@
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <ArduinoJson.h>
+#include "board.h"
+#include "input.h"
 #include "certs.h"
 
 extern TFT_eSPI tft;
@@ -18,17 +20,21 @@ extern TFT_eSPI tft;
 #endif
 
 static const char *DEFAULT_REPO = "maxfridbe/nmminer_claude_token_status";
-static const char *APP_ASSET    = "claude-status-app.bin";
+// Each board downloads its own build, e.g. claude-status-cyd-app.bin.
+static const char *APP_ASSET    = "claude-status-" BOARD_ID "-app.bin";
+#ifdef BOARD_CYD
+// Releases before per-board names published the CYD build under this name.
+static const char *LEGACY_ASSET = "claude-status-app.bin";
+#endif
 
 const char *fwVersion() { return FW_VERSION[0] ? FW_VERSION : "dev"; }
 static const char *repo() { return UPDATE_REPO[0] ? UPDATE_REPO : DEFAULT_REPO; }
 
-#define SCR_W 320
-#define SCR_H 240
 static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cText, cDim, cAccent, cBad, cTrack;
 
-static void screen(const char *title, const char *line1, const char *line2 = nullptr, uint16_t c2 = 0) {
+static void screen(const char *title, const char *line1, const char *line2 = nullptr, uint16_t c2 = 0,
+                   const char *line3 = nullptr) {
   tft.fillScreen(cBg);
   tft.setFreeFont(&FreeSansBold9pt7b);
   tft.setTextColor(cText);
@@ -36,8 +42,9 @@ static void screen(const char *title, const char *line1, const char *line2 = nul
   tft.drawString(title, 12, 16);
   tft.setTextFont(2);
   tft.setTextColor(cText);
-  tft.drawString(line1, 12, 60);
-  if (line2) { tft.setTextColor(c2 ? c2 : cDim); tft.drawString(line2, 12, 84); }
+  tft.drawString(line1, 12, 50);
+  if (line2) { tft.setTextColor(c2 ? c2 : cDim); tft.drawString(line2, 12, 72); }
+  if (line3) { tft.setTextColor(cDim); tft.drawString(line3, 12, 94); }
 }
 
 static void button(int x, int y, int w, int h, const char *label, bool primary) {
@@ -48,38 +55,50 @@ static void button(int x, int y, int w, int h, const char *label, bool primary) 
   tft.drawString(label, x + w / 2, y + h / 2);
 }
 
-// Up to three buttons in a row; returns the index tapped.
-static int chooseN(const char *const *labels, int n) {
+// Up to three buttons in a row; returns the index chosen. Touchscreens tap
+// a button; one-button boards tap to move the highlight and hold to pick.
+static void drawButtons(const char *const *labels, int n, int sel) {
   const int y = 170, h = 44, gap = 8, w = (SCR_W - 24 - gap * (n - 1)) / n;
   for (int i = 0; i < n; i++) {
     int x = 12 + i * (w + gap);
-    tft.fillSmoothRoundRect(x, y, w, h, 9, i == 0 ? cAccent : cKey, cBg);
+    bool primary = HAS_TOUCHSCREEN ? i == 0 : i == sel;
+    tft.fillSmoothRoundRect(x, y, w, h, 9, primary ? cAccent : cKey, cBg);
     tft.setTextFont(2);
-    tft.setTextColor(i == 0 ? cBg : cText);
+    tft.setTextColor(primary ? cBg : cText);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(labels[i], x + w / 2, y + h / 2);
   }
-  for (;;) {
-    int x, ty;
-    touchWaitTap(x, ty);
-    if (ty < y - 8 || ty > y + h + 8) continue;
-    for (int i = 0; i < n; i++)
-      if (x >= 12 + i * (w + gap) - gap / 2 && x < 12 + (i + 1) * (w + gap) - gap / 2) return i;
+  if (!HAS_TOUCHSCREEN) {
+    tft.fillRect(0, SCR_H - 16, SCR_W, 16, cBg);
+    tft.setTextFont(1);
+    tft.setTextColor(cDim);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
   }
 }
 
-// Two buttons (or one); returns true for the primary.
-static bool choose(const char *primary, const char *secondary) {
-  const int y = 170, h = 44;
-  button(12, y, 140, h, primary, true);
-  if (secondary) button(168, y, 140, h, secondary, false);
+static int chooseN(const char *const *labels, int n) {
+  const int y = 170, h = 44, gap = 8, w = (SCR_W - 24 - gap * (n - 1)) / n;
+  int sel = 0;
+  drawButtons(labels, n, sel);
   for (;;) {
-    int x, ty;
-    touchWaitTap(x, ty);
-    if (ty < y - 8 || ty > y + h + 8) continue;
-    if (x < 160) return true;
-    if (secondary) return false;
+    InputEvent e = inputWait();
+    if (!HAS_TOUCHSCREEN) {
+      if (e.kind == IN_HOLD) return sel;
+      sel = (sel + 1) % n;
+      drawButtons(labels, n, sel);
+      continue;
+    }
+    if (e.kind != IN_TAP || e.y < y - 8 || e.y > y + h + 8) continue;
+    for (int i = 0; i < n; i++)
+      if (e.x >= 12 + i * (w + gap) - gap / 2 && e.x < 12 + (i + 1) * (w + gap) - gap / 2) return i;
   }
+}
+
+// Two buttons (or one); returns true for the first.
+static bool choose(const char *primary, const char *secondary) {
+  const char *labels[] = {primary, secondary};
+  return chooseN(labels, secondary ? 2 : 1) == 0;
 }
 
 // github.com/<repo>/releases/latest redirects to .../releases/tag/<tag>.
@@ -106,7 +125,7 @@ static bool latestTag(String &tag, String &err) {
 }
 
 // Releases that carry an over-the-air image, newest first.
-struct Release { char tag[24]; char date[11]; };
+struct Release { char tag[24]; char date[11]; char asset[40]; };
 
 static int listReleases(Release *out, int max, String &err) {
   WiFiClientSecure tls;
@@ -136,10 +155,16 @@ static int listReleases(Release *out, int max, String &err) {
 
   int n = 0;
   for (JsonObjectConst r : doc.as<JsonArrayConst>()) {
-    bool ota = false;
-    for (JsonObjectConst a : r["assets"].as<JsonArrayConst>())
-      if (!strcmp(a["name"] | "", APP_ASSET)) ota = true;
-    if (!ota || n >= max) continue;
+    const char *found = nullptr;
+    for (JsonObjectConst a : r["assets"].as<JsonArrayConst>()) {
+      const char *name = a["name"] | "";
+      if (!strcmp(name, APP_ASSET)) found = APP_ASSET;
+#ifdef BOARD_CYD
+      else if (!found && !strcmp(name, LEGACY_ASSET)) found = LEGACY_ASSET;
+#endif
+    }
+    if (!found || n >= max) continue;
+    strlcpy(out[n].asset, found, sizeof(out[n].asset));
     strlcpy(out[n].tag, r["tag_name"] | "", sizeof(out[n].tag));
     strlcpy(out[n].date, r["published_at"] | "", sizeof(out[n].date));
     n++;
@@ -191,7 +216,7 @@ void updateSelfTest() {
 #endif
 
 // Download a release's app image into the idle slot and restart into it.
-static void installTag(const String &tag) {
+static void installTag(const String &tag, const char *asset = APP_ASSET) {
   screen("Updating", (String("Downloading ") + tag).c_str(), "Don't unplug the board.");
   WiFiClientSecure tls;
   tls.setCACert(GITHUB_ROOTS);
@@ -199,8 +224,8 @@ static void installTag(const String &tag) {
   httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   httpUpdate.rebootOnUpdate(false);
   httpUpdate.onProgress(drawProgress);
-  String url = String("https://github.com/") + repo() + "/releases/download/" + tag + "/" + APP_ASSET;
-  Serial.printf("[update] installing %s\n", tag.c_str());
+  String url = String("https://github.com/") + repo() + "/releases/download/" + tag + "/" + asset;
+  Serial.printf("[update] installing %s (%s)\n", tag.c_str(), asset);
   t_httpUpdate_return r = httpUpdate.update(tls, url);
 
   if (r == HTTP_UPDATE_OK) {
@@ -255,18 +280,32 @@ static void versionsScreen(const String &installed, const String &latest) {
   tft.setTextDatum(MC_DATUM);
   tft.drawString("Cancel", SCR_W / 2, by + 17);
 
+  // One-button boards: a highlight walks the rows and Cancel; hold picks.
+  int sel = 0, i = -1;
+  auto mark = [&](int k, bool on) {
+    int y = k < shown ? y0 + k * (rh + 4) : by;
+    int h = k < shown ? rh : 34;
+    tft.drawRoundRect(12, y, SCR_W - 24, h, 8, on ? cAccent : cBg);
+  };
+  if (!HAS_TOUCHSCREEN) mark(0, true);
   for (;;) {
-    int x, y;
-    touchWaitTap(x, y);
-    if (y >= by - 4) return;
-    int i = (y - y0) / (rh + 4);
-    if (y < y0 || i >= shown) continue;
+    InputEvent e = inputWait();
+    if (!HAS_TOUCHSCREEN) {
+      if (e.kind == IN_TAP) { mark(sel, false); sel = (sel + 1) % (shown + 1); mark(sel, true); continue; }
+      if (sel == shown) return;
+      i = sel;
+    } else {
+      if (e.kind != IN_TAP) continue;
+      if (e.y >= by - 4) return;
+      i = (e.y - y0) / (rh + 4);
+      if (e.y < y0 || i >= shown) continue;
+    }
     String tag = rel[i].tag;
     bool older = tag < installed && installed != "dev";
     screen("Install", (String("Install ") + tag + "?").c_str(),
-           older ? "That's older than what's installed. Settings and logins are kept."
-                 : "Settings and logins are kept.", older ? cAccent : cDim);
-    if (choose("Install", "Cancel")) installTag(tag);
+           older ? "Older than what's installed." : "Settings and logins are kept.",
+           older ? cAccent : cDim, older ? "Settings and logins are kept." : nullptr);
+    if (choose("Install", "Cancel")) installTag(tag, rel[i].asset);
     return;
   }
 }
@@ -296,13 +335,13 @@ void screenFirmwareUpdate() {
   bool newer = installed == "dev" || latest > installed;
   Serial.printf("[update] latest %s (%s)\n", latest.c_str(), newer ? "newer" : "not newer");
   screen("Firmware update", (String("Installed  ") + installed).c_str(),
-         (String("Latest       ") + latest + (newer ? "  - new" : "  - you're up to date")).c_str(),
-         newer ? cAccent : cDim);
+         (String("Latest     ") + latest).c_str(), newer ? cAccent : cDim,
+         newer ? "A newer release is available." : "You're up to date.");
   tft.setTextFont(1);
   tft.setTextColor(cDim);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString("Settings and logins are kept. If the download fails,", 12, 112);
-  tft.drawString("the current firmware keeps running.", 12, 124);
+  tft.drawString("Settings and logins are kept.", 12, 122);
+  tft.drawString("A failed download changes nothing.", 12, 134);
   const char *actions[] = {newer ? "Update" : "Reinstall", "Versions", "Cancel"};
   switch (chooseN(actions, 3)) {
     case 0: installTag(latest); break;

@@ -3,6 +3,8 @@
 #pragma once
 #include <Arduino.h>
 #include <time.h>
+#include "board.h"
+#include "input.h"
 
 #define MAX_ACCOUNTS 4   // 3+ scroll sideways, two at a time
 #define MAX_BUCKETS  6
@@ -71,12 +73,14 @@ void   uiHideHotspot();
 void   uiShowMenu();
 void   uiCloseOverlay();
 int    uiOverlay();
-int    uiMenuHit(int x, int y);       // menu row at a touch point, or -1
+// Menu entries by what they do, since boards show different sets.
+enum MenuAction { MA_NONE = -1, MA_PHONE, MA_WIFI_SCREEN, MA_WIFI_PHONE, MA_UPDATE, MA_RESTART, MA_CLOSE };
+MenuAction uiMenuHit(int x, int y);   // touchscreens: entry at a point, or MA_NONE
+void       uiMenuNext();              // one-button boards: move the highlight
+MenuAction uiMenuSelected();          // one-button boards: the highlighted entry
 bool   uiSetupButtonHit(int x, int y); // "Use this screen" on the setup screen
 
-// main.cpp: one calibrated touch sample, false when not pressed
-bool   touchRead(int &x, int &y);
-// wifi_screen.cpp: blocks for one tap (the point where it started); false on timeout
+// wifi_screen.cpp (touchscreens): blocks for one tap; false on timeout
 bool   touchWaitTap(int &x, int &y, uint32_t timeoutMs = 0);
 bool   uiScroll(int delta);   // with 3+ accounts: +1 right, -1 left; true if it moved
 bool   uiNextPage();          // with 3+ accounts: advance one page, wrapping around

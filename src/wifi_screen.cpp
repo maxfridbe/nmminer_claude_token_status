@@ -1,4 +1,8 @@
 #include "wifi_screen.h"
+#include "board.h"
+#include <Arduino.h>
+
+#if HAS_TOUCHSCREEN
 #include "model.h"
 #include "settings.h"
 #include <TFT_eSPI.h>
@@ -6,8 +10,6 @@
 
 extern TFT_eSPI tft;
 
-#define SCR_W 320
-#define SCR_H 240
 
 static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cKeyHi, cText, cDim, cAccent, cBad;
@@ -339,3 +341,9 @@ bool screenWifiSetup() {
   }
   return false;
 }
+
+#else
+// One-button boards have no keyboard: WiFi is set up from a phone instead.
+bool screenWifiSetup() { return false; }
+bool touchWaitTap(int &, int &, uint32_t) { return false; }
+#endif

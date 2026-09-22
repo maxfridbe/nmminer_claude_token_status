@@ -40,9 +40,11 @@ jobs:
       - name: Check the image embeds no config or credentials
         run: |
           test ! -e include/secrets.h
-          if strings -n 6 firmware/claude-status.bin | grep -E 'sk-ant-|oat01-|ort01-'; then
-            echo "Token-like strings in the image"; exit 1
-          fi
+          for f in firmware/*.bin; do
+            if strings -n 6 "$f" | grep -E 'sk-ant-|oat01-|ort01-'; then
+              echo "Token-like strings in $f"; exit 1
+            fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,9 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            firmware/claude-status.bin firmware/claude-status.bin.sha256 \
-            firmware/claude-status-app.bin firmware/claude-status-app.bin.sha256 \
+          gh release create "$GITHUB_REF_NAME" firmware/*.bin firmware/*.sha256 \
             --title "claude-status $GITHUB_REF_NAME" \
-            --notes "Generic firmware for the ESP32-2432S028 (Cheap Yellow Display). New board: ./flashonly.sh, then set up on the touchscreen. Board already on an OTA-capable release: hold the screen, Update firmware. claude-status-app.bin is the over-the-air image. See the README." \
+            --notes "Generic firmware per board: claude-status-cyd.bin (ESP32-2432S028 Cheap Yellow Display) and claude-status-nmtv.bin (NMMiner NM-TV 1.54in). New board: ./flashonly.sh. Board on v26.09.02 or later: hold the screen, Update firmware. The -app.bin files are the over-the-air images; claude-status.bin and claude-status-app.bin are the CYD build under its old names. See the README." \
             --generate-notes

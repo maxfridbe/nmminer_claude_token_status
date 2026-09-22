@@ -3,8 +3,9 @@
 # No build tools and no config file: setup happens on the board afterwards
 # (WiFi on its touchscreen, Claude accounts from your phone).
 #
-#   ./flashonly.sh             pick a USB device, flash the latest release
-#   ./flashonly.sh --local     flash firmware/claude-status.bin from tools/make_release.sh
+#   ./flashonly.sh             pick the board and USB device, flash the latest release
+#   ./flashonly.sh --board nmtv  skip the board question (cyd or nmtv)
+#   ./flashonly.sh --local     flash the image from tools/make_release.sh
 #   ./flashonly.sh --erase     wipe the board first (its WiFi, accounts and logins)
 #   PORT=/dev/ttyUSB0 ./flashonly.sh --yes     no questions (not with --erase)
 #
@@ -14,25 +15,39 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$HERE"
 REPO="${CLAUDE_STATUS_REPO:-maxfridbe/nmminer_claude_token_status}"
-URL="https://github.com/$REPO/releases/latest/download/claude-status.bin"
 VENV="$HERE/.flashtool"
-IMG="$HERE/firmware/claude-status.bin"
 
 log()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 ask()  { local a; read -r -p "$1" a </dev/tty; printf '%s' "$a"; }
 
-LOCAL=0; ERASE=0; YES=0
-for arg in "$@"; do
+LOCAL=0; ERASE=0; YES=0; BOARD="${BOARD:-}"
+while [[ $# -gt 0 ]]; do
+  arg="$1"; shift
   case "$arg" in
+    --board)   BOARD="${1:-}"; shift ;;
     --local)   LOCAL=1 ;;
     --erase)   ERASE=1 ;;
     --yes|-y)  YES=1 ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         die "unknown option: $arg (try --help)" ;;
   esac
 done
+
+# --- which board. Both can use the same USB chip, so ask rather than guess.
+if [[ -z "$BOARD" ]]; then
+  if [[ $YES -eq 1 ]]; then BOARD=cyd
+  else
+    echo "Which board?"
+    echo "  1) CYD    ESP32-2432S028 Cheap Yellow Display, 2.8in touchscreen"
+    echo "  2) NM-TV  NMMiner NM-TV, 1.54in square screen with a touch button"
+    case "$(ask "Board [1]: ")" in 2|nmtv) BOARD=nmtv ;; *) BOARD=cyd ;; esac
+  fi
+fi
+[[ "$BOARD" == cyd || "$BOARD" == nmtv ]] || die "--board must be cyd or nmtv"
+URL="https://github.com/$REPO/releases/latest/download/claude-status-$BOARD.bin"
+IMG="$HERE/firmware/claude-status-$BOARD.bin"
 
 # --- esptool, in a local venv
 if [[ ! -x "$VENV/bin/esptool" ]]; then
@@ -46,10 +61,10 @@ ESPTOOL="$VENV/bin/esptool"
 # --- firmware image
 if [[ $LOCAL -eq 1 ]]; then
   [[ -f "$IMG" ]] || die "No $IMG. Build one with tools/make_release.sh"
-  log "Using local image $(basename "$IMG")"
+  log "Using local image $(basename "$IMG") ($BOARD)"
 else
   mkdir -p firmware
-  log "Downloading the latest release from github.com/$REPO"
+  log "Downloading the latest $BOARD release from github.com/$REPO"
   curl -fL --progress-bar -o "$IMG.part" "$URL" \
     || die "Download failed. Offline? Build locally with tools/make_release.sh, then use --local"
   curl -fsL -o "$IMG.sha256.part" "$URL.sha256" || die "Couldn't download the checksum"

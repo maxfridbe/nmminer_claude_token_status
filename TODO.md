@@ -24,6 +24,16 @@
 - [ ] **Layouts on real data.** 1 account (full screen) and 3 accounts
       (page flip every 12 s, swipe).
 
+## NM-TV bring-up (untested on hardware)
+
+- [ ] **Find the button.** Flash `env:nmtv-probe`, touch the button, read the
+      serial log. Set `BUTTON_PIN` and `BUTTON_TOUCHPAD` in `src/board.h`.
+- [ ] **Display.** Confirm the power pin (GPIO 21) should be driven high, and
+      that inversion (`TFT_INVERSION_ON`), color order and rotation look right.
+- [ ] **Flash size.** Over-the-air updates assume 4 MB (`min_spiffs.csv`).
+- [ ] **Square layout** on real data: header, ring, week bar, two meters.
+- [ ] **Button menu:** hold, tap to move, hold to pick; update screen likewise.
+
 ## Watch
 
 - [ ] **Refresh-token lifetime.** The first reading was 27.7 days, right after

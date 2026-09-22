@@ -1,10 +1,11 @@
-// Claude usage dashboard for the ESP32-2432S028 "Cheap Yellow Display".
+// Claude usage dashboard for ESP32 display boards (see board.h).
 //
 // Checks every account every refresh_minutes (sooner while the network is
 // unreachable) and redraws every 30 seconds so reset countdowns and the WiFi
 // signal stay current. With sleep_minutes set, the screen dims out after that
-// long without a touch or a change, and a touch or a change brings it back. With three or more accounts,
-// swipe sideways (or tap near an edge) to scroll.
+// long without a touch or a change, and a touch or a change brings it back.
+// When accounts don't all fit, pages flip on a timer; swipe (touchscreen) or
+// tap (button) to move by hand. Hold for the menu.
 //
 // With no WiFi saved, or with the screen held at power-on, it starts a setup
 // hotspot instead; the setup website takes it from there.
@@ -14,25 +15,12 @@
 #include "web.h"
 #include "wifi_screen.h"
 #include "update.h"
-#include <SPI.h>
+#include "input.h"
+#include "board.h"
 #include <WiFi.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
 
-// Touch controller: its own pins, not the display's HSPI bus.
-#define XPT2046_CLK  25
-#define XPT2046_MOSI 32
-#define XPT2046_CS   33
-#define XPT2046_MISO 39
-#define XPT2046_IRQ  36
-#define TS_MINX      200     // raw extents, landscape
-#define TS_MAXX      3700
-#define TS_MINY      240
-#define TS_MAXY      3800
-#define LONG_PRESS_MS 1500   // hold this long for the menu
-#define Z_MIN        280     // real presses on this panel read 400+
-#define SWIPE_PX     40      // horizontal travel that counts as a swipe
-#define EDGE_PX      60      // taps this close to either side scroll too
+#define EDGE_PX      60      // touchscreen taps this close to a side scroll too
 
 #define BL_CHANNEL 1
 #define BL_FREQ    5000
@@ -43,8 +31,6 @@
 #define RETRY_MIN_MS (2UL * 60UL * 1000UL)  // first retry after a network failure
 
 TFT_eSPI tft = TFT_eSPI();
-SPIClass touchSPI(VSPI);
-XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Account   accounts[MAX_ACCOUNTS];
 int       accountCount  = 0;
@@ -74,16 +60,18 @@ static uint32_t checkIntervalMs() {
 
 static uint32_t onLevel() { return BL_MAX * constrain((int)cfg.brightness, 5, 100) / 100; }
 
-static void setBacklight(uint32_t v) { blLevel = v; ledcWrite(BL_CHANNEL, v); }
+// Duty in "brightness" terms; some boards light the backlight on a low level.
+static void blWrite(uint32_t v) { ledcWrite(BL_CHANNEL, BL_ACTIVE_LOW ? BL_MAX - v : v); }
+
+static void setBacklight(uint32_t v) { blLevel = v; blWrite(v); }
 
 static void rampBacklight(uint32_t to, uint32_t ms) {
   uint32_t start = millis();
   while (millis() - start < ms) {
-    ledcWrite(BL_CHANNEL, (uint32_t)((float)to * (millis() - start) / ms));
+    blWrite((uint32_t)((float)to * (millis() - start) / ms));
     delay(8);
   }
-  ledcWrite(BL_CHANNEL, to);
-  blLevel = to;
+  setBacklight(to);
 }
 
 static void panelSleep(bool sleep) {
@@ -141,30 +129,16 @@ static String statsSignature() {
 }
 
 
-// ---------------------------------------------------------------- touch
+// ---------------------------------------------------------------- input
 
-static bool touching = false, longFired = false;
-static int  startX, startY, lastX, lastY, releaseCount;
-static uint32_t pressStart;
-
-// The IRQ line only drops under real pressure, so it gates every read.
-bool touchRead(int &x, int &y) {
-  if (digitalRead(XPT2046_IRQ) == HIGH || !ts.touched()) return false;
-  TS_Point p = ts.getPoint();
-  if (p.z < Z_MIN) return false;
-  x = constrain(map(p.x, TS_MINX, TS_MAXX, 0, 320), 0, 319);
-  y = constrain(map(p.y, TS_MINY, TS_MAXY, 0, 240), 0, 239);
-  return true;
-}
-
-static void menuAction(int item) {
-  Serial.printf("[menu] %d\n", item);
-  switch (item) {
-    case 0:   // phone setup page, over the board's own hotspot
+static void menuAction(MenuAction act) {
+  Serial.printf("[menu] %d\n", (int)act);
+  switch (act) {
+    case MA_PHONE:        // phone setup page, over the board's own hotspot
       webStartHotspot();
       uiShowHotspot(webApSsid(), webApPass(), webHotspotUrl().c_str());
       break;
-    case 1:   // WiFi on the touchscreen; accounts and logins untouched
+    case MA_WIFI_SCREEN:  // WiFi on the touchscreen; accounts and logins untouched
       if (screenWifiSetup()) {
         uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
         delay(900);
@@ -172,67 +146,68 @@ static void menuAction(int item) {
       }
       uiCloseOverlay();
       break;
-    case 2:   // WiFi from a phone, on the setup hotspot at next boot
+    case MA_WIFI_PHONE:   // WiFi from a phone, on the setup hotspot at next boot
       settingsRequestSetup();
       uiSplash("Restarting into WiFi setup...");
       delay(700);
       ESP.restart();
       break;
-    case 3:   // firmware from the latest GitHub release
+    case MA_UPDATE:       // firmware from GitHub releases
       screenFirmwareUpdate();
       uiCloseOverlay();
       break;
-    case 4:
+    case MA_RESTART:
       uiSplash("Restarting...");
       delay(400);
       ESP.restart();
       break;
-    case 5:
+    case MA_CLOSE:
+    default:
       uiCloseOverlay();
       break;
   }
 }
 
-// Hold for the menu. On release: a tap works the menu or closes an overlay,
-// a swipe scrolls toward where the finger came from, and a tap near either
-// edge scrolls that way.
-static void pollTouch() {
-  int x, y;
-  if (touchRead(x, y)) {
-    if (!touching) { touching = true; longFired = false; startX = x; startY = y; pressStart = millis(); }
-    lastX = x; lastY = y;
-    releaseCount = 0;
-    if (!longFired && millis() - pressStart >= LONG_PRESS_MS &&
-        abs(lastX - startX) < 30 && abs(lastY - startY) < 30) {
-      longFired = true;
-      wake("touch");
-      Serial.println("[touch] menu");
-      uiShowMenu();
-    }
+static void scrollBy(int step) {
+  if (step && uiScroll(step)) {
+    Serial.printf("[input] page %+d\n", step);
+    uiDrawAll();
+    lastTick = lastPageFlip = millis();   // let the reader stay on this page
+  }
+}
+
+// Hold opens the menu (on a one-button board, holding in the menu picks the
+// highlighted item). A tap works an open menu or closes an overlay; on the
+// dashboard, a swipe or edge tap scrolls (touchscreen) or a tap moves to the
+// next page (button).
+static void handleInput() {
+  InputEvent e = inputPoll();
+  if (e.kind == IN_NONE) return;
+
+  if (e.kind == IN_HOLD) {
+    wake("hold");
+    if (!HAS_TOUCHSCREEN && uiOverlay() == OV_MENU) { menuAction(uiMenuSelected()); return; }
+    Serial.println("[input] menu");
+    uiShowMenu();
     return;
   }
-  if (!touching || ++releaseCount < 3) return;
-  touching = false;
-  if (longFired) return;                     // the hold already opened the menu
   if (screen != SCREEN_ON) { wake("touch"); return; }
   lastActivity = millis();
 
   switch (uiOverlay()) {
-    case OV_MENU:    { int i = uiMenuHit(lastX, lastY); if (i >= 0) menuAction(i); return; }
+    case OV_MENU:
+      if (HAS_TOUCHSCREEN) { MenuAction a = uiMenuHit(e.x, e.y); if (a != MA_NONE) menuAction(a); }
+      else                 uiMenuNext();
+      return;
     case OV_HOTSPOT: uiCloseOverlay(); return;
     case OV_PIN:     return;
   }
 
-  int dx = lastX - startX, step = 0;
-  if (dx <= -SWIPE_PX)            step = +1;
-  else if (dx >= SWIPE_PX)        step = -1;
-  else if (lastX < EDGE_PX)       step = -1;
-  else if (lastX > 320 - EDGE_PX) step = +1;
-  if (step && uiScroll(step)) {
-    Serial.printf("[touch] scroll %+d\n", step);
-    uiDrawAll();
-    lastTick = lastPageFlip = millis();   // let the reader stay on this page
-  }
+  if (e.kind == IN_SWIPE_LEFT)  { scrollBy(+1); return; }
+  if (e.kind == IN_SWIPE_RIGHT) { scrollBy(-1); return; }
+  if (!HAS_TOUCHSCREEN)         { if (uiNextPage()) { uiDrawAll(); lastTick = lastPageFlip = millis(); } return; }
+  if (e.x < EDGE_PX)            scrollBy(-1);
+  else if (e.x > SCR_W - EDGE_PX) scrollBy(+1);
 }
 
 // ---------------------------------------------------------------- checks
@@ -266,11 +241,11 @@ static void runCheck() {
 // Held from power-on for HOLD_MS: the way back to setup when the old WiFi is
 // gone and the menu can't be reached over it.
 static bool heldAtBoot() {
-  if (digitalRead(XPT2046_IRQ) == HIGH) return false;
+  if (!inputPressed()) return false;
   uiSplash("Keep holding for setup...");
   uint32_t start = millis();
   while (millis() - start < HOLD_MS)
-    if (digitalRead(XPT2046_IRQ) == HIGH) return false;
+    if (!inputPressed()) return false;
   return true;
 }
 
@@ -293,21 +268,23 @@ static void maybeStartWeb() {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.printf("\nclaude-status %s starting\n", fwVersion());
+  Serial.printf("\nclaude-status %s (%s) starting\n", fwVersion(), BOARD_ID);
 
+  if (PANEL_POWER_PIN >= 0) {            // boards that switch the display's power
+    pinMode(PANEL_POWER_PIN, OUTPUT);
+    digitalWrite(PANEL_POWER_PIN, HIGH);
+    delay(20);
+  }
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(TFT_ROTATION);
   tft.fillScreen(TFT_BLACK);
 
-  // tft.init() drives the backlight as a plain GPIO; hand it to LEDC to set 90%.
+  // tft.init() drives the backlight as a plain GPIO; hand it to LEDC for dimming.
   ledcSetup(BL_CHANNEL, BL_FREQ, BL_BITS);
   ledcAttachPin(TFT_BL, BL_CHANNEL);
-  ledcWrite(BL_CHANNEL, 0);
+  blWrite(0);
 
-  pinMode(XPT2046_IRQ, INPUT);
-  touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
-  ts.begin(touchSPI);
-  ts.setRotation(1);
+  inputBegin();
 
   uiInit();
 #ifdef DEMO_DATA
@@ -344,13 +321,12 @@ void setup() {
 #endif
 }
 
-// Setup hotspot screen: "Use this screen" types the WiFi in right here.
+// Setup hotspot screen: on a touchscreen, "Use this screen" types the WiFi in
+// right here.
 static void setupModeTouch() {
-  int x, y;
-  if (!touchRead(x, y)) return;
-  int rx = x, ry = y, released = 0;
-  while (released < 3) { released = touchRead(x, y) ? 0 : released + 1; delay(10); }
-  if (!uiSetupButtonHit(rx, ry)) return;
+  if (!HAS_TOUCHSCREEN) return;
+  InputEvent e = inputPoll();
+  if (e.kind != IN_TAP || !uiSetupButtonHit(e.x, e.y)) return;
   if (screenWifiSetup()) {
     uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
     delay(900);
@@ -374,14 +350,15 @@ void loop() {
   }
   if ((int32_t)(now - nextCheckAt) >= 0) { runCheck(); return; }
   updateScreen(now);
-  pollTouch();
+  handleInput();
   if (screen == SCREEN_OFF) { delay(20); return; }
   if (now - lastTick >= TICK_MS) {
     lastTick = now;
     apiPollLink();
     uiDrawAll();
   }
-  if (cfg.pageSeconds > 0 && !touching && now - lastPageFlip >= cfg.pageSeconds * 1000UL) {
+  if (cfg.pageSeconds > 0 && !inputPressed() && uiOverlay() == OV_NONE &&
+      now - lastPageFlip >= cfg.pageSeconds * 1000UL) {
     lastPageFlip = now;
     if (uiNextPage()) { Serial.println("[page] auto flip"); uiDrawAll(); }
   }

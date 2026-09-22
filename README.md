@@ -30,14 +30,31 @@ The layout follows the number of accounts:
 | 2 | Side by side, as in the photo |
 | 3–4 | Two at a time, flipping to the next page every 12 seconds (`page_seconds`). Swipe sideways, or tap near an edge, to scroll by hand; the timer restarts after a manual scroll. Dots at the bottom and arrows at the edges show where you are |
 
-## Hardware
+## Boards
 
-An ESP32-2432S028 "Cheap Yellow Display": ESP32, 320x240 ILI9341 panel, CH340
-USB serial. They're widely available for around $15.
+| Board | Screen | Input | Status |
+|---|---|---|---|
+| ESP32-2432S028 "Cheap Yellow Display" (CYD) | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
+| NMMiner NM-TV 1.54" | 1.54" 240x240 ST7789 | one touch button on top | **untested**: built from NMTech's published pins, not yet run on the hardware |
 
-Some units power up with inverted colors. This build sends `INVON` to correct
+Both are classic ESP32 boards; everything but the screen and input is shared.
+Each gets its own firmware, `claude-status-cyd.bin` or `claude-status-nmtv.bin`,
+and updates itself with its own `-app.bin`.
+
+Some CYD units power up with inverted colors. This build sends `INVON` to correct
 them (`TFT_INVERSION_ON` in `platformio.ini`). If your screen shows black text
 on white, remove that flag.
+
+### NM-TV differences
+
+- One account per page on the square screen; pages flip on the timer, or tap
+  the button for the next one. Hold the button for the menu, then tap to move
+  the highlight and hold to pick.
+- No on-screen keyboard, so WiFi is set up from a phone (**WiFi with a phone**
+  in the menu, or the setup hotspot on first boot).
+- The button's pin isn't published. `pio run -e nmtv-probe -t upload`, then
+  watch the serial monitor while touching it; set `BUTTON_PIN` (and
+  `BUTTON_TOUCHPAD`) in `src/board.h` from what it reports.
 
 ## Get started
 
@@ -46,14 +63,15 @@ You need the board, a USB data cable, and a Linux machine with Python 3 and
 
     ./flashonly.sh
 
-It lists the USB serial devices it finds, lets you pick the board, downloads
-the latest release, checks its checksum, and flashes it. A board that was
+It asks which board you have, lists the USB serial devices it finds, lets
+you pick one, downloads that board's latest release, checks its checksum, and
+flashes it. `--board cyd` or `--board nmtv` skips the question. A board that was
 already set up keeps its WiFi, accounts and logins. If `flashonly.sh` can't
 open the port: `sudo usermod -aG dialout $USER`, then log out and back in.
 
 Then finish on the board, as described next. Prefer esptool directly? On a
-*fresh* board, `esptool --chip esp32 write-flash 0x0 claude-status.bin` with
-the image from the [releases page](../../releases). Don't do that on a board
+*fresh* board, `esptool --chip esp32 write-flash 0x0 claude-status-cyd.bin` (or
+`-nmtv`) with the image from the [releases page](../../releases). Don't do that on a board
 you've set up: the image's padding covers the settings area. `flashonly.sh`
 writes around it.
 
@@ -245,7 +263,10 @@ deploy, run `tools/scope_test.py <alias>`.
 |---|---|
 | `flashonly.sh` | pick a USB device, flash the latest release (keeps the board's settings) |
 | `deploy_and_build.sh` | build from source and flash, from a config file or generic |
-| `tools/make_release.sh` | builds the generic image, `firmware/claude-status.bin` |
+| `tools/make_release.sh` | builds each board's generic images into `firmware/` |
+| `src/board.h` | per-board screen, backlight and input settings |
+| `src/input.cpp` | touchscreen or single button, as taps, holds and swipes |
+| `src/probe/probe.cpp` | NM-TV button finder (`env:nmtv-probe`) |
 | `.github/workflows/release.yml` | builds that image on GitHub and publishes it for each `v*` tag |
 | `login.sh` | create and verify the board's own Claude logins |
 | `config.example.toml` | config template |
@@ -265,7 +286,7 @@ deploy, run `tools/scope_test.py <alias>`.
 
 ## Updates over the air
 
-**Update firmware** in the menu downloads `claude-status-app.bin` from the
+**Update firmware** in the menu downloads its board's `-app.bin` from the
 latest GitHub release into the board's second program slot, verifies it,
 and restarts into it. **Versions** on the same screen lists every release
 that has an over-the-air image (v26.09.02 and later), newest first, with the
