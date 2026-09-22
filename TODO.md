@@ -64,4 +64,8 @@
       board: layout switch kept settings; installed the GitHub build of
       v26.09.02 via OTA_SELFTEST and rebooted into it with both accounts OK.
 - [x] **Update firmware** from the menu: v26.09.02 to v26.09.03 on the board, accounts kept.
-- [ ] **Versions** (v26.09.04): downgrade to v26.09.03, then update back.
+- [x] **Versions** list on the board shows v26.09.07, v26.09.06 and the older
+      releases under their pre-per-board file name.
+- [x] **Per-board releases** (v26.09.06+): `flashonly.sh --board cyd` flashed
+      v26.09.06 from GitHub; the board then updated itself to v26.09.07.
+- [ ] Downgrade from **Versions** to an older release, then update back.
