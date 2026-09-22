@@ -677,9 +677,9 @@ static void drawMenu() {
   tft.drawString("Menu", MENU_X + 26, 19);
   char where[64];
 #if SQUARE_SCREEN
-  snprintf(where, sizeof(where), "%s", fwVersion());
+  snprintf(where, sizeof(where), "%s %s", fwVersion(), BOARD_ID);
 #else
-  snprintf(where, sizeof(where), "%s  %s  %s", fwVersion(), wifiLink.ssid,
+  snprintf(where, sizeof(where), "%s %s  %s  %s", fwVersion(), BOARD_ID, wifiLink.ssid,
            wifiLink.up ? WiFi.localIP().toString().c_str() : "offline");
 #endif
   tft.setTextFont(1);
@@ -844,4 +844,10 @@ void uiSplash(const char *status) {
   tft.setTextColor(C_DIM);
   tft.setTextDatum(MC_DATUM);
   tft.drawString(status, SCR_W / 2, 150);
+  // Which firmware is starting, so an update is easy to confirm.
+  char ver[40];
+  snprintf(ver, sizeof(ver), "%s  %s", fwVersion(), BOARD_ID);
+  tft.setTextFont(1);
+  tft.setTextColor(C_FAINT);
+  tft.drawString(ver, SCR_W / 2, SCR_H - 12);
 }
