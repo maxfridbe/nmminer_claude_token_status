@@ -670,7 +670,8 @@ static bool looksLikeGuest(const char *ssid) {
 static void drawRemote(const char *title, const String &footer) {
   linkTitle(title);
   RelayState st = relayState();
-  if (st == RELAY_UP) drawQr(tft, J_QR_X, J_QR_Y, J_QR, relayLink().c_str());
+  String link = relayLink();              // stays valid while the relay reconnects
+  if (link.length()) drawQr(tft, J_QR_X, J_QR_Y, J_QR, link.c_str());
   else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", "retrying; or use the hotspot", C_HOT);
   else qrPlaceholder("Connecting to the relay", relayBrokerName()[0] ? relayBrokerName() : "...", C_SOFT);
 

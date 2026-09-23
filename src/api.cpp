@@ -6,6 +6,7 @@
 
 #include "model.h"
 #include "settings.h"
+#include "relay.h"
 
 #ifndef DEMO_DATA
 
@@ -247,6 +248,7 @@ static String httpError(int code) {
 
 // POST JSON to the token endpoint; returns the HTTP status and the reply.
 static int postToken(JsonDocument &req, String &resp) {
+  relayPause();                     // two TLS sessions don't fit in memory together
   WiFiClientSecure tls;
   tls.setCACert(ROOT_CAS);
   HTTPClient http;
@@ -263,6 +265,7 @@ static int postToken(JsonDocument &req, String &resp) {
 }
 
 static int apiGet(const char *url, const String &token, String &body) {
+  relayPause();
   WiFiClientSecure tls;
   tls.setCACert(ROOT_CAS);
   HTTPClient http;

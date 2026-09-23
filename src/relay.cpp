@@ -29,6 +29,7 @@ static RelayState state = RELAY_OFF;
 static Broker custom;
 static char customHost[64], customWss[96];
 static const Broker *broker = nullptr;       // the one connected, or being tried
+static const Broker *linked = nullptr;       // the one the QR names; kept through pauses
 static int tryIndex;
 static uint32_t lastTry, lastUse;
 static char room[17];                        // 64 bits, hex
@@ -127,6 +128,8 @@ static void onMessage(char *topic, uint8_t *payload, unsigned int len) {
   inboxLen = len;
 }
 
+static bool reconnect();
+
 static void handleInbox() {
   size_t n;
   bool ok = unseal('q', inbox, inboxLen, plain, n);
@@ -145,6 +148,7 @@ static void handleInbox() {
   if (req["b"].is<JsonObject>()) in.set(req["b"]);
   int status = webApiCall(method, path, in, out);
   Serial.printf("[relay] %s %s -> %d\n", method, path, status);
+  if (!reconnect()) { Serial.println("[relay] couldn't reconnect to reply"); return; }
 
   JsonDocument reply;
   reply["n"] = seq;
@@ -175,7 +179,26 @@ static bool connectTo(const Broker *b) {
   return true;
 }
 
+// After relayPause(), in the middle of a request: back on the same broker,
+// so the reply reaches the page.
+static bool reconnect() {
+  if (mqtt.connected()) return true;
+  if (!broker || !connectTo(broker)) return false;
+  state = RELAY_UP;
+  return true;
+}
+
 // ---------------------------------------------------------------- public
+
+void relayPause() {
+  if (state != RELAY_UP) return;
+  mqtt.disconnect();
+  tls.stop();
+  state = RELAY_CONNECTING;                   // relayLoop() reconnects
+  tryIndex = 0;
+  lastTry = 0;
+  Serial.printf("[relay] paused for another TLS request, free heap %u\n", (unsigned)ESP.getFreeHeap());
+}
 
 void relayStart() {
   lastUse = millis();
@@ -197,6 +220,7 @@ void relayStart() {
   snprintf(topicA, sizeof(topicA), "cs1/%s/a", room);
   lastSeq = 0;
   inboxLen = 0;
+  linked = nullptr;
   tryIndex = 0;
   lastTry = 0;
   state = RELAY_CONNECTING;
@@ -207,7 +231,7 @@ void relayStop() {
   mqtt.disconnect();
   tls.stop();
   state = RELAY_OFF;
-  broker = nullptr;
+  broker = linked = nullptr;
   memset(key, 0, sizeof(key));
   Serial.println("[relay] off");
 }
@@ -237,6 +261,7 @@ void relayLoop() {
   if (connectTo(list[tryIndex % n])) {
     state = RELAY_UP;
     tryIndex = 0;
+    linked = broker;
 #ifdef RELAY_DEBUG_LINK
     Serial.printf("[relay] link %s\n", relayLink().c_str());   // test builds only: it holds the key
 #endif
@@ -247,11 +272,12 @@ void relayLoop() {
 
 RelayState relayState() { return state; }
 
-const char *relayBrokerName() { return state == RELAY_UP && broker ? broker->host : ""; }
+const char *relayBrokerName() { return state != RELAY_OFF && linked ? linked->host : ""; }
 
 // https://owner.github.io/repo/#r=room&k=key&b=h
 String relayLink() {
-  if (state != RELAY_UP || !broker) return "";
+  const Broker *broker = linked;
+  if (state == RELAY_OFF || !broker) return "";
   String repo = updateRepo();
   int slash = repo.indexOf('/');
   String owner = repo.substring(0, slash), name = repo.substring(slash + 1);

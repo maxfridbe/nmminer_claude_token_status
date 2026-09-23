@@ -10,7 +10,7 @@ const RELAY_BROKERS = {
   h: 'wss://broker.hivemq.com:8884/mqtt',
   m: 'wss://test.mosquitto.org:8081/mqtt',
 };
-const RELAY_TIMEOUT_MS = 30000;
+const RELAY_TIMEOUT_MS = 60000;   // a sign-in makes the board reconnect first
 
 function b64urlDecode(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');

@@ -19,6 +19,9 @@ enum RelayState { RELAY_OFF, RELAY_CONNECTING, RELAY_UP, RELAY_FAILED };
 
 void       relayStart();          // new room and key, unless already running
 void       relayStop();
+// Drops the relay's TLS session to free its memory for another one; the
+// relay reconnects on its own, with the same room and key.
+void       relayPause();
 void       relayLoop();
 RelayState relayState();
 String     relayLink();           // the page link for the QR; "" until up

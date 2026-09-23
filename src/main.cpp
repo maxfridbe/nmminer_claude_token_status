@@ -410,9 +410,11 @@ void loop() {
 
   uint32_t now = millis();
   relayLoop();
-  static RelayState shown = RELAY_OFF;       // redraw the QR screens as the relay comes up
-  if (relayState() != shown) {
-    shown = relayState();
+  static String shown;                       // redraw the QR screens when the link changes
+  String now_ = relayLink();
+  if (!now_.length()) now_ = String((int)relayState());   // no link yet: its progress
+  if (now_ != shown) {
+    shown = now_;
     if (uiOverlay() == OV_REMOTE || (accountCount == 0 && uiOverlay() == OV_NONE)) uiDrawAll();
   }
   maybeStartWeb();
