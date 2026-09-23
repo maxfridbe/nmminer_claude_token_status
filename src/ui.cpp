@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "web.h"
 #include "update.h"
+#include "relay.h"
 #include <WiFi.h>
 #include <qrcode.h>
 
@@ -529,10 +530,15 @@ static void drawLinkStrip(TFT_eSPI &g, int ox) {
 // Dark modules on a white quiet zone, as phone scanners expect.
 static void drawQr(TFT_eSPI &g, int x, int y, int maxPx, const char *text) {
   static uint8_t buf[((8 * 4 + 17) * (8 * 4 + 17) + 7) / 8];   // version 8 modules
-  QRCode qr;
+  // The library doesn't check capacity (too long a text overruns its stack
+  // buffers), so pick the version here: bytes that fit at ECC_LOW, v1-v8.
+  static const uint8_t CAP[8] = {17, 32, 53, 78, 106, 134, 154, 192};
+  size_t len = strlen(text);
   int v = 1;
-  while (v <= 8 && qrcode_initText(&qr, buf, v, ECC_LOW, text) != 0) v++;
+  while (v <= 8 && CAP[v - 1] < len) v++;
   if (v > 8) return;
+  QRCode qr;
+  qrcode_initText(&qr, buf, v, ECC_LOW, text);
   int scale = max(1, maxPx / (qr.size + 4));
   int side = (qr.size + 4) * scale;
   g.fillRect(x, y, side, side, TFT_WHITE);
@@ -543,13 +549,34 @@ static void drawQr(TFT_eSPI &g, int x, int y, int maxPx, const char *text) {
 }
 
 static void stepText(int x, int y, const char *num, const char *text, uint16_t col) {
-  tft.setTextFont(2);
+  tft.setTextFont(BIG_SCREEN ? 4 : 2);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(C_MARK);
   tft.drawString(num, x, y);
   tft.setTextColor(col);
-  tft.drawString(text, x + 14, y);
+  tft.drawString(text, x + (BIG_SCREEN ? 22 : 14), y);
 }
+
+// Where drawJoin puts its text column, per screen. J_IN indents the detail
+// lines under each numbered step.
+#if SQUARE_SCREEN
+#define J_QR_X 4
+#define J_QR_Y 40
+#define J_QR   128
+#define J_X    138
+#elif BIG_SCREEN
+#define J_QR_X 12
+#define J_QR_Y 46
+#define J_QR   252
+#define J_X    280
+#else
+#define J_QR_X 10
+#define J_QR_Y 40
+#define J_QR   150
+#define J_X    172
+#endif
+#define J_IN   (BIG_SCREEN ? 22 : 14)
+#define JY(v)  ((v) * SCR_H / 240)
 
 // "Join the board's hotspot, then open the page": QR on the left, steps on
 // the right. Used for first-boot setup, while no account exists, and from
@@ -559,43 +586,176 @@ static void drawJoin(const char *title, const char *ssid, const char *pass, cons
   tft.fillScreen(C_BG);
   char wifiQr[96];
   snprintf(wifiQr, sizeof(wifiQr), "WIFI:T:WPA;S:%s;P:%s;;", ssid, pass);
+  drawQr(tft, J_QR_X, J_QR_Y, J_QR, wifiQr);
+  const int x = J_X;
 #if SQUARE_SCREEN
   // 240x240: title across the top, QR bottom-left, steps to its right.
-  drawQr(tft, 4, 40, 128, wifiQr);
   drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-  const int x = 138;
   if (!strncmp(url, "http://", 7)) url += 7;         // the column is narrow
   if (!strncmp(ssid, "claude-status-", 14)) ssid += 14 - 3;   // "...b4c8"
 #else
-  drawQr(tft, 10, 40, 150, wifiQr);
-  drawMark(tft, 172, 12, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-  const int x = 172;
+  drawMark(tft, x, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
 #endif
-  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setFreeFont(BIG_SCREEN ? &FreeSansBold12pt7b : &FreeSansBold9pt7b);
   tft.setTextColor(C_TEXT);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString(title, SQUARE_SCREEN ? PAD + 24 : 196, SQUARE_SCREEN ? 18 : 21);
+  tft.drawString(title, SQUARE_SCREEN ? PAD + 24 : x + 24, SQUARE_SCREEN ? 18 : JY(21));
 
-  stepText(x, 46, "1", "Scan to join", C_SOFT);
-  tft.setTextFont(1);
+  stepText(x, JY(46), "1", "Scan to join", C_SOFT);
+  tft.setTextFont(BIG_SCREEN ? 2 : 1);
   tft.setTextColor(C_DIM);
-  tft.drawString(ssid, x + 14, 66);
-  tft.drawString(String("pw ") + pass, x + 14, 78);
-  stepText(x, 98, "2", "Open", C_SOFT);
+  tft.drawString(ssid, x + J_IN, JY(66));
+  tft.drawString(String("pw ") + pass, x + J_IN, JY(78));
+  stepText(x, JY(98), "2", "Open", C_SOFT);
+  tft.setTextFont(2);                 // stepText left the big font set
   tft.setTextColor(C_TEXT);
-  tft.drawString(url, x + 14, 118);
-  stepText(x, 142, "3", step3, C_SOFT);
+  tft.drawString(fit(tft, url, SCR_W - x - J_IN - 4), x + J_IN, JY(118));
+  stepText(x, JY(142), "3", step3, C_SOFT);
 
-  tft.setTextFont(1);
+  tft.setTextFont(BIG_SCREEN ? 2 : 1);
   tft.setTextColor(C_FAINT);
   tft.setTextDatum(BL_DATUM);
-  tft.drawString(fit(tft, footer, SCR_W - 16), SQUARE_SCREEN ? 6 : 10, SCR_H - 6);
+  tft.drawString(fit(tft, footer, SCR_W - 16), SQUARE_SCREEN ? 6 : J_QR_X, SCR_H - 6);
 }
 
-#define SETUP_BTN_X 172
-#define SETUP_BTN_Y 170
-#define SETUP_BTN_W 138
-#define SETUP_BTN_H 36
+static char lanUrl[40];          // for the "This network" screen
+
+static void infoLine(int x, int y, const String &s, uint16_t col) {
+  tft.setTextFont(BIG_SCREEN ? 2 : 1);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(col);
+  tft.drawString(fit(tft, s, SCR_W - x - 4), x, y);
+}
+
+static void linkTitle(const char *title) {
+  tft.fillScreen(C_BG);
+#if SQUARE_SCREEN
+  drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+#else
+  drawMark(tft, J_X, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+#endif
+  tft.setFreeFont(BIG_SCREEN ? &FreeSansBold12pt7b : &FreeSansBold9pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString(title, SQUARE_SCREEN ? PAD + 24 : J_X + 24, SQUARE_SCREEN ? 18 : JY(21));
+}
+
+static void linkFooter(const String &s) {
+  tft.setTextFont(BIG_SCREEN ? 2 : 1);
+  tft.setTextColor(C_FAINT);
+  tft.setTextDatum(BL_DATUM);
+  tft.drawString(fit(tft, s, SCR_W - 16), SQUARE_SCREEN ? 6 : J_QR_X, SCR_H - 6);
+}
+
+// Text centred in the QR's square, while there's no QR to show.
+static void qrPlaceholder(const char *l1, const char *l2, uint16_t col) {
+  const int cx = J_QR_X + J_QR / 2, cy = J_QR_Y + J_QR / 2;
+  tft.drawRoundRect(J_QR_X, J_QR_Y, J_QR, J_QR, 12, C_FAINT);
+  tft.setTextFont(BIG_SCREEN ? 2 : 1);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(col);
+  tft.drawString(fit(tft, l1, J_QR - 12), cx, cy - 8);
+  tft.setTextColor(C_DIM);
+  tft.drawString(fit(tft, l2, J_QR - 12), cx, cy + 8);
+}
+
+static bool looksLikeGuest(const char *ssid) {
+  String s = ssid;
+  s.toLowerCase();
+  return s.indexOf("guest") >= 0 || s.indexOf("visitor") >= 0 || s.indexOf("public") >= 0;
+}
+
+// The relay's QR: works from any network, since both ends only reach out
+// to the relay server.
+static void drawRemote(const char *title, const String &footer) {
+  linkTitle(title);
+  RelayState st = relayState();
+  if (st == RELAY_UP) drawQr(tft, J_QR_X, J_QR_Y, J_QR, relayLink().c_str());
+  else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", "retrying; or use the hotspot", C_HOT);
+  else qrPlaceholder("Connecting to the relay", relayBrokerName()[0] ? relayBrokerName() : "...", C_SOFT);
+
+  const int x = J_X;
+  stepText(x, JY(46), "1", SQUARE_SCREEN ? "Scan it" : "Scan with phone", C_SOFT);
+  infoLine(x + J_IN, JY(66), "Any network works:", C_DIM);
+  infoLine(x + J_IN, JY(78), "guest WiFi, mobile data", C_DIM);
+  stepText(x, JY(98), "2", SQUARE_SCREEN ? "Set up" : "Set up on the page", C_SOFT);
+  infoLine(x + J_IN, JY(118), "Encrypted end to end", C_DIM);
+  infoLine(x + J_IN, JY(130), String("via ") + (relayBrokerName()[0] ? relayBrokerName() : "relay"), C_DIM);
+  linkFooter(footer);
+}
+
+// The page at the board's address on this network. Guest networks keep
+// devices apart, so say so, louder when the name gives it away.
+static void drawLan() {
+  linkTitle("This network");
+  drawQr(tft, J_QR_X, J_QR_Y, J_QR, lanUrl);
+  const int x = J_X;
+  stepText(x, JY(46), "1", SQUARE_SCREEN ? "Scan it" : "Scan with phone", C_SOFT);
+  infoLine(x + J_IN, JY(66), String("phone on ") + wifiLink.ssid, C_DIM);
+  infoLine(x + J_IN, JY(78), lanUrl + 7, C_TEXT);
+  stepText(x, JY(98), "2", SQUARE_SCREEN ? "PIN" : "Enter the PIN", C_SOFT);
+  infoLine(x + J_IN, JY(118), "shown here on request", C_DIM);
+  bool guest = looksLikeGuest(wifiLink.ssid);
+  infoLine(x, JY(146), guest ? "Looks like guest WiFi:" : "Guest WiFi blocks this.", C_WARN);
+  infoLine(x, JY(158), guest ? "phones can't reach the" : "If the page won't load,", C_WARN);
+  infoLine(x, JY(170), guest ? "board. Use Remote link." : "use Remote link instead.", C_WARN);
+  linkFooter("Tap to close.");
+}
+
+int uiChoose(const char *title, const char *const *labels, const char *const *subs, int n) {
+  const int y0 = BIG_SCREEN ? 48 : 34, rowH = BIG_SCREEN ? 60 : 44, gap = BIG_SCREEN ? 8 : 4;
+  const int x = 12, w = SCR_W - 24;
+  int sel = 0;
+  auto paint = [&]() {
+    tft.fillScreen(C_BG);
+    tft.setFreeFont(BIG_SCREEN ? &FreeSansBold12pt7b : &FreeSansBold9pt7b);
+    tft.setTextColor(C_TEXT);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(title, x + 2, y0 / 2);
+    for (int i = 0; i < n; i++) {
+      int y = y0 + i * (rowH + gap);
+      tft.fillSmoothRoundRect(x, y, w, rowH, 10, rgb(0x1C1C23), C_BG);
+      if (!HAS_TOUCHSCREEN && i == sel) tft.drawRoundRect(x, y, w, rowH, 10, C_MARK);
+      bool hasSub = subs && subs[i] && subs[i][0];
+      if (BIG_SCREEN) tft.setFreeFont(&FreeSansBold9pt7b); else tft.setTextFont(2);
+      tft.setTextColor(C_TEXT);
+      tft.setTextDatum(ML_DATUM);
+      tft.drawString(fit(tft, labels[i], w - 28), x + 14, y + (hasSub ? rowH / 3 : rowH / 2));
+      if (!hasSub) continue;
+      const char *sub = subs[i];
+      bool warn = sub[0] == '!';                    // a leading '!' marks a warning
+      tft.setTextFont(BIG_SCREEN ? 2 : 1);
+      tft.setTextColor(warn ? C_WARN : C_DIM);
+      tft.drawString(fit(tft, sub + warn, w - 28), x + 14, y + rowH * 3 / 4);
+    }
+    if (!HAS_TOUCHSCREEN) {
+      tft.setTextFont(1);
+      tft.setTextColor(C_FAINT);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
+    }
+  };
+  paint();
+  for (;;) {
+    InputEvent e = inputWait();
+    if (!HAS_TOUCHSCREEN) {
+      if (e.kind == IN_HOLD) return sel;
+      sel = (sel + 1) % n;
+      paint();
+      continue;
+    }
+    if (e.kind != IN_TAP) continue;
+    for (int i = 0; i < n; i++) {
+      int y = y0 + i * (rowH + gap);
+      if (e.y >= y - gap / 2 && e.y < y + rowH + gap / 2) return i;
+    }
+  }
+}
+
+#define SETUP_BTN_X J_X
+#define SETUP_BTN_Y JY(170)
+#define SETUP_BTN_W (SCR_W - J_X - 10)
+#define SETUP_BTN_H (BIG_SCREEN ? 50 : 36)
 
 void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
   drawJoin("WiFi setup", apSsid, apPass, url, "Pick WiFi",
@@ -603,7 +763,7 @@ void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
   if (!HAS_TOUCHSCREEN) return;
   // Or skip the phone: type the WiFi password on this screen.
   tft.fillSmoothRoundRect(SETUP_BTN_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, 9, C_MARK, C_BG);
-  tft.setTextFont(2);
+  tft.setTextFont(BIG_SCREEN ? 4 : 2);
   tft.setTextColor(C_BG);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("Use this screen", SETUP_BTN_X + SETUP_BTN_W / 2, SETUP_BTN_Y + SETUP_BTN_H / 2);
@@ -632,6 +792,9 @@ void uiHidePin()      { if (overlay == OV_PIN) uiCloseOverlay(); }
 void uiHideHotspot()  { if (overlay == OV_HOTSPOT) uiCloseOverlay(); }
 void uiShowMenu()     { overlay = OV_MENU; menuSel = 0; uiDrawAll(); }
 void uiCloseOverlay() { overlay = OV_NONE; uiDrawAll(); }
+
+void uiShowRemote()             { overlay = OV_REMOTE; uiDrawAll(); }
+void uiShowLan(const char *url) { strlcpy(lanUrl, url, sizeof(lanUrl)); overlay = OV_LAN; uiDrawAll(); }
 
 void uiShowHotspot(const char *ssid, const char *pass, const char *url) {
   strlcpy(hsSsid, ssid, sizeof(hsSsid));
@@ -665,7 +828,7 @@ static void drawPinOverlay() {
 // highlight with each tap (hold picks it).
 struct MenuEntry { MenuAction act; const char *label; const char *sub; };
 static const MenuEntry MENU[] = {
-  {MA_PHONE,       "Phone setup page",    ""},
+  {MA_PHONE,       "Phone setup",         ""},
 #if HAS_TOUCHSCREEN
   {MA_WIFI_SCREEN, "WiFi on this screen", ""},
 #endif
@@ -680,11 +843,19 @@ static const MenuEntry MENU[] = {
 };
 #define MENU_ENTRIES ((int)(sizeof(MENU) / sizeof(MENU[0])))
 #if HAS_TOUCHSCREEN
-#define MENU_ROWS (MENU_ENTRIES - 1)           // Restart and Close share a row
-#define MENU_X    16
+// Two buttons a row; Restart and Close share the last one.
+#define MENU_ITEMS (MENU_ENTRIES - 2)
+#define MENU_ROWS ((MENU_ITEMS + 1) / 2 + 1)
+#define MENU_X    12
+#if BIG_SCREEN
+#define MENU_Y0   44
+#define MENU_H    46
+#define MENU_GAP  8
+#else
 #define MENU_Y0   34
-#define MENU_H    30
-#define MENU_GAP  4
+#define MENU_H    34
+#define MENU_GAP  6
+#endif
 #else
 #define MENU_ROWS MENU_ENTRIES
 #define MENU_X    12
@@ -699,9 +870,14 @@ MenuAction uiMenuHit(int x, int y) {
   for (int i = 0; i < MENU_ROWS; i++) {
     int top = MENU_Y0 + i * (MENU_H + MENU_GAP);
     if (y < top - MENU_GAP / 2 || y >= top + MENU_H + MENU_GAP / 2) continue;
-    if (HAS_TOUCHSCREEN && i == MENU_ROWS - 1)
-      return x >= MENU_X + MENU_W / 2 ? MA_CLOSE : MA_RESTART;
+#if HAS_TOUCHSCREEN
+    bool right = x >= MENU_X + MENU_W / 2;
+    if (i == MENU_ROWS - 1) return right ? MA_CLOSE : MA_RESTART;
+    int k = i * 2 + right;
+    return k < MENU_ITEMS ? MENU[k].act : MA_NONE;
+#else
     return MENU[i].act;
+#endif
   }
   return MA_NONE;
 }
@@ -728,20 +904,24 @@ static void drawMenu() {
   tft.setTextDatum(MR_DATUM);
   tft.drawString(where, SCR_W - MENU_X, 19);
 
+#if HAS_TOUCHSCREEN
+  const int half = (MENU_W - 6) / 2;
+  for (int k = 0; k < MENU_ENTRIES; k++) {
+    int row = k < MENU_ITEMS ? k / 2 : MENU_ROWS - 1;
+    int col = k < MENU_ITEMS ? k % 2 : k - MENU_ITEMS;
+    int bx = MENU_X + col * (half + 6), y = MENU_Y0 + row * (MENU_H + MENU_GAP);
+    bool quiet = k >= MENU_ITEMS;                  // Restart, Close
+    tft.fillSmoothRoundRect(bx, y, half, MENU_H, 10, rgb(quiet ? 0x101014 : 0x1C1C23), C_BG);
+    if (k == 0) tft.drawRoundRect(bx, y, half, MENU_H, 10, C_MARK);
+    if (BIG_SCREEN) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
+    tft.setTextColor(quiet ? C_SOFT : C_TEXT);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(MENU[k].label, bx + half / 2, y + MENU_H / 2);
+  }
+  return;
+#endif
   for (int i = 0; i < MENU_ROWS; i++) {
     int y = MENU_Y0 + i * (MENU_H + MENU_GAP);
-    if (HAS_TOUCHSCREEN && i == MENU_ROWS - 1) {   // Restart | Close
-      const int half = (MENU_W - 6) / 2;
-      for (int k = 0; k < 2; k++) {
-        int bx = MENU_X + k * (half + 6);
-        tft.fillSmoothRoundRect(bx, y, half, MENU_H, 10, rgb(0x16161B), C_BG);
-        tft.setTextFont(2);
-        tft.setTextColor(C_TEXT);
-        tft.setTextDatum(MC_DATUM);
-        tft.drawString(MENU[i + k].label, bx + half / 2, y + MENU_H / 2);
-      }
-      continue;
-    }
     bool lit = HAS_TOUCHSCREEN ? i == 0 : i == menuSel;
     tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
     if (lit) tft.drawRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_MARK);
@@ -766,6 +946,12 @@ static void drawMenu() {
 
 // No accounts yet: the hotspot is up, so show how to join it.
 static void drawEmptyScreen() {
+  if (relayState() == RELAY_UP) {
+    String footer;
+    if (webHotspotUp()) footer = String("Or join ") + webApSsid() + "  pw " + webApPass() + "  -> " + (webHotspotUrl().c_str() + 7);
+    drawRemote("Add account", footer);
+    return;
+  }
   if (webHotspotUp()) {
     char footer[64] = "";
     if (cfg.hosting && wifiLink.up)
@@ -885,7 +1071,7 @@ bool uiConfirm(const char *title, const char *line, const char *yes, const char 
 
 // The only status is a small dot, top right of the accounts, while a check runs.
 void uiDrawStatus() {
-  if (overlay == OV_MENU || overlay == OV_HOTSPOT) return;
+  if (overlay == OV_MENU || overlay == OV_HOTSPOT || overlay == OV_REMOTE || overlay == OV_LAN) return;
   uint16_t c = netStatus == NET_CHECKING ? C_INFO : C_BG;
   tft.fillSmoothCircle(SQUARE_SCREEN ? SCR_W - 5 : 2 * COL_W - 8, SQUARE_SCREEN ? 4 : 7, 3, c, C_BG);
 }
@@ -944,6 +1130,12 @@ static void drawScrollHints() {
 
 void uiDrawAll() {
   if (overlay == OV_MENU) { drawMenu(); return; }
+  if (overlay == OV_REMOTE) {
+    drawRemote("Remote setup", SQUARE_SCREEN ? "Tap to close. One-time link."
+                               : "One-time link, new each time. Ends after 15 idle min. Tap to close.");
+    return;
+  }
+  if (overlay == OV_LAN) { drawLan(); return; }
   if (overlay == OV_HOTSPOT) {
     drawJoin("Phone setup", hsSsid, hsPass, hsUrl, SQUARE_SCREEN ? "Settings" : "Accounts & settings",
              SQUARE_SCREEN ? "Tap to close. Off after 15 idle min"

@@ -152,10 +152,46 @@ writes around it.
    network and type its password on the on-screen keyboard. Or scan the QR
    code with a phone to join the board's hotspot and pick the network on the
    page that opens.
-2. **Accounts.** With no account yet, the board keeps its own hotspot up and
-   shows a QR code to join it. On your phone, join, open `http://192.168.4.1`,
-   press **Add a Claude account**, name it, choose model meters, tap
-   **Open claude.ai**, approve, and paste back the code claude.ai shows.
+2. **Accounts.** With no account yet, the board shows a **remote setup** QR
+   code. Scan it with your phone on any network: guest WiFi or mobile data
+   both work. On the page that opens, press **Add a Claude account**, name
+   it, choose model meters, tap **Open claude.ai**, approve, and paste back
+   the code claude.ai shows. If the relay server can't be reached, the board
+   shows its hotspot's QR code instead (below).
+
+### Three ways to reach the setup page
+
+**Phone setup** in the menu offers:
+
+| Way | Works on guest WiFi | Notes |
+|---|---|---|
+| **Remote link** | yes | a one-time link through a public MQTT relay, encrypted end to end. Your phone stays on its own network |
+| **This network (IP address)** | usually not | the board's address, for a phone on the same network. Guest networks keep devices apart, so this screen warns you, louder when the network's name has "guest" in it. Changes need a PIN from the screen |
+| **Board hotspot** | yes | your phone joins the board's own WiFi. No internet while it's joined |
+
+#### Remote link
+
+The QR code opens the setup page hosted on this repository's GitHub Pages
+(`https://<owner>.github.io/<repo>/`). Everything after the `#` in the link,
+which browsers never send to a server, is a random room name and a fresh
+AES-128 key. The board and the page swap the setup page's usual requests over
+a public MQTT server, sealed with AES-GCM under that key, so the server sees
+only ciphertext. Each request carries a rising counter, and the board drops
+any copy replayed by someone watching the server.
+
+The link is new every time the relay starts and dies after 15 idle minutes.
+It also stays up while the board has no account. Whoever scans the code gets
+the same access as someone on the board's hotspot, so treat the QR on the
+screen like a password.
+
+Relay servers: by default HiveMQ's public broker, then Mosquitto's test
+server if HiveMQ is down. Both are free and best-effort. To pin one, or to
+use your own, set **Relay server** on the setup page: `hivemq`, `mosquitto`,
+or `host:tlsport|wss://host:port/path`. Your own server's certificate must
+chain to a root in `RELAY_ROOTS` (`include/certs.h`), which covers Let's
+Encrypt.
+
+#### Board hotspot
 
 The hotspot works on guest networks, which stop devices on them from reaching
 each other. Its password changes every time and appears only on the screen, so
@@ -170,7 +206,7 @@ Press and hold the screen for about 1.5 seconds:
 
 | Item | Does |
 |---|---|
-| Phone setup page | turns on the board's hotspot and shows its QR code; it turns off after 15 idle minutes |
+| Phone setup | reach the setup page from a phone: remote link, this network's address, or the board's hotspot (see above) |
 | WiFi on this screen | pick a network and type its password on the keyboard |
 | WiFi with a phone | restarts into the setup hotspot |
 | Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
@@ -213,7 +249,7 @@ specific board.
 With `enable_hosting = true` the setup page is also available on your
 network, for changing settings or adding accounts from any device there. Its
 address appears on the right edge of the screen, next to the WiFi name. This
-doesn't work on guest networks; use the menu's **Phone setup page** there.
+doesn't work on guest networks; use the menu's **Phone setup**, **Remote link** there.
 
 ### Script and website together
 
@@ -319,6 +355,10 @@ deploy, run `tools/scope_test.py <alias>`.
 - The board verifies TLS against pinned roots (`include/certs.h`).
 - The setup hotspot is WPA2 with a password that changes every boot and is
   shown only on the screen.
+- The remote link relays only AES-GCM ciphertext; the key is in the part of
+  the link after `#`, which never leaves the phone. The page is served from
+  this repository with a Content-Security-Policy that allows no scripts from
+  elsewhere and connections only to wss servers.
 - On your network, any change on the setup page needs a PIN that the board
   displays on request. It's valid for 2 minutes, five wrong guesses cancel it,
   and a correct one signs in one browser.
@@ -348,6 +388,10 @@ deploy, run `tools/scope_test.py <alias>`.
 | `src/settings.cpp` | settings and logins in the board's flash; applies a script config |
 | `src/web.cpp` | setup hotspot, captive portal, setup page API, PIN |
 | `src/web_page.h` | the setup page itself |
+| `src/relay.cpp` | remote setup: MQTT over TLS, AES-GCM, replay protection |
+| `web/relay.js` | the page's side of the relay: MQTT over WebSocket, WebCrypto |
+| `tools/build_pages.py` | page + relay.js → `site/index.html` for GitHub Pages |
+| `.github/workflows/pages.yml` | publishes that page on every change |
 | `src/wifi_screen.cpp` | WiFi setup on the touchscreen: network list and keyboard |
 | `src/api.cpp` | WiFi, NTP, sign-in, token refresh, usage fetch and parsing, demo data |
 | `src/ui.cpp` | full-screen, side-by-side and scrolling layouts; ring, meters, WiFi strip |
@@ -355,7 +399,7 @@ deploy, run `tools/scope_test.py <alias>`.
 | `tools/config.py` | config loading and validation |
 | `tools/scope_test.py` | checks that a login can be narrowed to `user:profile` |
 | `tools/svg_to_alpha.py` | rasterizes `assets/claude-mark.svg` into `include/claude_mark.h` |
-| `include/certs.h` | pinned root CAs for the two TLS endpoints |
+| `include/certs.h` | pinned root CAs: Claude, GitHub, the relay servers |
 | `screenshots/` | photos for this README |
 
 ## Updates over the air

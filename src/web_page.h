@@ -1,5 +1,7 @@
 // The setup website, served from flash. One page; every value from the device
-// or a WiFi scan is inserted as text, never as HTML.
+// or a WiFi scan is inserted as text, never as HTML. tools/build_pages.py
+// also publishes it to GitHub Pages with web/relay.js, which supplies
+// window.csRelay so every api() call goes through the relay instead.
 #pragma once
 
 static const char WEB_PAGE[] = R"HTML(<!doctype html>
@@ -45,6 +47,7 @@ function el(tag, props, ...kids) {
   return e;
 }
 async function api(path, body) {
+  if (window.csRelay) return window.csRelay(path, body);
   const opt = body === undefined ? {} :
     {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
   const r = await fetch(path, opt);
@@ -71,7 +74,7 @@ function render() {
   else body = [accountsCard(), addCard(), deviceCard()];
   app.replaceChildren(...head, ...body.filter(Boolean));
   clearTimeout(timer);
-  if (S.mode === 'lan' && S.authed) timer = setTimeout(load, 20000);
+  if (S.mode === 'lan' && S.authed) timer = setTimeout(load, S.via === 'relay' ? 60000 : 20000);
 }
 
 function wifiCard(setup) {
@@ -184,11 +187,11 @@ function showSignin(alias, url, resumed) {
     el('p', {class: 'muted', text: 'Sign in as the account you want shown as "' + alias +
       '". If this browser is signed in to a different Claude account, use a private window.'}),
     el('a', {class: 'btn', href: url, target: '_blank', rel: 'noopener', text: 'Open claude.ai'}));
-  box.append(
+  if (S.via === 'hotspot') box.append(
     el('p', {class: 'muted', text: "If claude.ai won't load, your phone is sending everything through the " +
       "board's hotspot, which has no internet. Copy the link, switch back to your usual network, open it " +
-      'there and approve, copy the code it shows, then rejoin the hotspot and reopen this page. It picks up here.'}),
-    link, el('button', {class: 'alt', text: 'Copy link', onclick: () => copyText(link, box)}),
+      'there and approve, copy the code it shows, then rejoin the hotspot and reopen this page. It picks up here.'}));
+  box.append(link, el('button', {class: 'alt', text: 'Copy link', onclick: () => copyText(link, box)}),
     el('div', {class: 'step', text: '2. Paste the code it shows'}), code);
   const finish = el('button', {text: 'Finish', onclick: async () => {
     finish.disabled = true;
@@ -207,6 +210,9 @@ function showSignin(alias, url, resumed) {
 function deviceCard() {
   const where = S.via === 'hotspot'
     ? "Connected through the board's hotspot (" + S.hotspot + '). It turns off after 15 idle minutes.'
+    : S.via === 'relay'
+    ? 'Connected through the relay (' + S.relay + '), encrypted end to end. The link stops working ' +
+      'after 15 idle minutes; the display makes a new one each time.'
     : 'Address: ' + S.url + '  or  ' + S.mdns;
   const c = el('div', {class: 'card'}, el('h2', {text: 'Device'}), el('p', {class: 'muted', text: where}),
     el('p', {class: 'muted', text: 'Press and hold the display for its menu: this page, change WiFi, restart.'}));
@@ -215,10 +221,12 @@ function deviceCard() {
   const sleep = num(S.sleepMinutes, 0, 1440), dim = num(S.dimMinutes, 0, 120);
   const secs = num(S.pageSeconds, 0, 3600);
   const hosting = el('input', {type: 'checkbox'}); hosting.checked = S.hosting;
+  const relay = el('input', {value: S.relayCfg || '', placeholder: 'automatic', autocapitalize: 'off', autocorrect: 'off'});
   const save = el('button', {text: 'Save', onclick: async () => {
     try {
       await api('/api/settings', {refreshMinutes: +refresh.value, brightness: +bright.value,
-        sleepMinutes: +sleep.value, dimMinutes: +dim.value, pageSeconds: +secs.value, hosting: hosting.checked});
+        sleepMinutes: +sleep.value, dimMinutes: +dim.value, pageSeconds: +secs.value, hosting: hosting.checked,
+        relay: relay.value.trim()});
       note(c, 'Saved.'); load();
     } catch (e) { note(c, e.message, true); }
   }});
@@ -228,7 +236,9 @@ function deviceCard() {
     el('label', {text: 'Dim out after this many idle minutes (0 = never)'}), sleep,
     el('label', {text: 'Fade length before the screen turns off (minutes)'}), dim,
     el('label', {text: 'Seconds per page, with 3+ accounts (0 = only by touch)'}), secs,
-    el('label', {class: 'check'}, hosting, 'Keep this page available after a restart'), save, wifi,
+    el('label', {class: 'check'}, hosting, 'Keep this page available after a restart'),
+    el('label', {text: 'Relay server for remote setup: empty for automatic (HiveMQ, then Mosquitto), ' +
+      'hivemq, mosquitto, or your own as host:port|wss://address'}), relay, save, wifi,
     el('button', {class: 'alt', text: 'Restart', onclick: async () => { await api('/api/reboot', {}); note(c, 'Restarting...'); }}),
     el('button', {class: 'bad', text: 'Erase everything', onclick: async () => {
       if (!confirm('Erase WiFi, accounts and logins, and restart into first-time setup?')) return;

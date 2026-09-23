@@ -24,6 +24,7 @@ static void loadNvs() {
   getStr("tz", cfg.tz, sizeof(cfg.tz), "UTC0");
   getStr("rscope", cfg.refreshScope, sizeof(cfg.refreshScope), "user:profile");
   cfg.hosting     = prefs.getBool("hosting", false);
+  getStr("relay", cfg.relay, sizeof(cfg.relay));
   cfg.pageSeconds    = prefs.getUShort("pagesec", 12);
   cfg.refreshMinutes = prefs.getUShort("refmin", 15);
   cfg.brightness     = prefs.getUChar("bright", 90);
@@ -70,6 +71,7 @@ void settingsSave() {
   prefs.putString("tz", cfg.tz);
   prefs.putString("rscope", cfg.refreshScope);
   prefs.putBool("hosting", cfg.hosting);
+  prefs.putString("relay", cfg.relay);
   prefs.putUShort("pagesec", cfg.pageSeconds);
   prefs.putUShort("refmin", cfg.refreshMinutes);
   prefs.putUChar("bright", cfg.brightness);

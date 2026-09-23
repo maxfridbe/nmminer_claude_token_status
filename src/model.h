@@ -65,12 +65,17 @@ void   uiDrawAll();
 void   uiDrawStatus();
 void   uiSetupScreen(const char *apSsid, const char *apPass, const char *url);
 // Overlays sit on top of the dashboard and survive its redraws.
-enum OverlayKind { OV_NONE, OV_PIN, OV_HOTSPOT, OV_MENU };
+enum OverlayKind { OV_NONE, OV_PIN, OV_HOTSPOT, OV_MENU, OV_REMOTE, OV_LAN };
 void   uiShowPin(const char *pin);
 void   uiHidePin();
 void   uiShowHotspot(const char *ssid, const char *pass, const char *url);
 void   uiHideHotspot();
 void   uiShowMenu();
+void   uiShowRemote();                 // the relay's QR, or its progress
+void   uiShowLan(const char *url);     // the page's address on this network
+// A full-screen list to pick from; returns the index picked. A sub line that
+// starts with '!' is shown as a warning.
+int    uiChoose(const char *title, const char *const *labels, const char *const *subs, int n);
 void   uiCloseOverlay();
 int    uiOverlay();
 // Menu entries by what they do, since boards show different sets.

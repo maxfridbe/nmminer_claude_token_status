@@ -10,6 +10,11 @@
 
 extern TFT_eSPI tft;
 
+// Everything here is laid out for 320x240 and scaled from it, so the 4"
+// 480x320 screen gets bigger keys rather than a small keyboard in a corner.
+#define SX(v) ((v) * SCR_W / 320)
+#define BIG   (SCR_H >= 320)
+#define HEAD_H (BIG ? 34 : 26)
 
 static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cKeyHi, cText, cDim, cAccent, cBad;
@@ -36,18 +41,18 @@ static void header(const char *title, const char *sub = nullptr) {
   tft.setFreeFont(&FreeSansBold9pt7b);
   tft.setTextColor(cText);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString(title, 10, 14);
+  tft.drawString(title, 10, HEAD_H / 2 + 1);
   if (sub) {
-    tft.setTextFont(1);
+    tft.setTextFont(BIG ? 2 : 1);
     tft.setTextColor(cDim);
     tft.setTextDatum(MR_DATUM);
-    tft.drawString(sub, SCR_W - 10, 14);
+    tft.drawString(sub, SCR_W - 10, HEAD_H / 2 + 1);
   }
 }
 
 static void button(int x, int y, int w, int h, const char *label, uint16_t fill, uint16_t fg) {
   tft.fillSmoothRoundRect(x, y, w, h, 8, fill, cBg);
-  tft.setTextFont(2);
+  if (BIG) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
   tft.setTextColor(fg);
   tft.setTextDatum(MC_DATUM);
   tft.drawString(label, x + w / 2, y + h / 2);
@@ -65,9 +70,11 @@ static const char *ROWS[3][3] = {
   {"1234567890", "-/:;()$&@\"", ".,?!'_+"},
   {"[]{}#%^*=~", "\\|<>`'\"?!,", ".,_-+/:"},
 };
-#define KB_Y   62
-#define KEY_H  42
-#define KEY_W  32
+#define FIELD_Y (HEAD_H)
+#define FIELD_H (BIG ? 40 : 30)
+#define KB_Y   (FIELD_Y + FIELD_H + 6)
+#define KEY_W  (SCR_W / 10)
+#define KEY_H  ((SCR_H - KB_Y) / 4)
 
 struct Key { int x, y, w, h; char ch; int action; };   // action: 0 char, else special
 enum { K_SHIFT = 1, K_BACK, K_LAYER, K_LAYER2, K_SPACE, K_CANCEL, K_OK, K_SHOW };
@@ -78,16 +85,16 @@ static int layoutKeys(Layer layer, Key *keys) {
     const char *row = ROWS[layer][r];
     int len = strlen(row);
     int y = KB_Y + r * KEY_H;
-    int x0 = (r == 2) ? 48 : (SCR_W - len * KEY_W) / 2;
+    int x0 = (r == 2) ? SX(48) : (SCR_W - len * KEY_W) / 2;
     for (int i = 0; i < len; i++) keys[n++] = {x0 + i * KEY_W, y, KEY_W, KEY_H, row[i], 0};
   }
   int y2 = KB_Y + 2 * KEY_H, y3 = KB_Y + 3 * KEY_H;
-  keys[n++] = {0, y2, 48, KEY_H, 0, layer == ABC ? K_SHIFT : K_LAYER2};
-  keys[n++] = {SCR_W - 48, y2, 48, KEY_H, 0, K_BACK};
-  keys[n++] = {0, y3, 56, KEY_H, 0, K_LAYER};
-  keys[n++] = {56, y3, 136, KEY_H, ' ', K_SPACE};
-  keys[n++] = {192, y3, 56, KEY_H, 0, K_CANCEL};
-  keys[n++] = {248, y3, 72, KEY_H, 0, K_OK};
+  keys[n++] = {0, y2, SX(48), KEY_H, 0, layer == ABC ? K_SHIFT : K_LAYER2};
+  keys[n++] = {SCR_W - SX(48), y2, SX(48), KEY_H, 0, K_BACK};
+  keys[n++] = {0, y3, SX(56), KEY_H, 0, K_LAYER};
+  keys[n++] = {SX(56), y3, SX(136), KEY_H, ' ', K_SPACE};
+  keys[n++] = {SX(192), y3, SX(56), KEY_H, 0, K_CANCEL};
+  keys[n++] = {SX(248), y3, SCR_W - SX(248), KEY_H, 0, K_OK};
   return n;
 }
 
@@ -112,7 +119,8 @@ static void drawKey(const Key &k, Layer layer, bool shift, bool pressed) {
   uint16_t fg = (pressed || k.action == K_OK) ? cBg : cText;
   tft.fillRect(k.x, k.y, k.w, k.h, cBg);
   tft.fillSmoothRoundRect(k.x + 2, k.y + 2, k.w - 4, k.h - 4, 6, fill, cBg);
-  tft.setTextFont(k.action ? 2 : 4);
+  if (k.action && BIG) tft.setFreeFont(&FreeSansBold9pt7b);
+  else tft.setTextFont(k.action ? 2 : 4);
   tft.setTextColor(fg);
   tft.setTextDatum(MC_DATUM);
   tft.drawString(keyLabel(k, layer, shift, buf), k.x + k.w / 2, k.y + k.h / 2 + (k.action ? 0 : 1));
@@ -120,16 +128,16 @@ static void drawKey(const Key &k, Layer layer, bool shift, bool pressed) {
 
 // The typed text, masked unless shown; long text scrolls to keep its end visible.
 static void drawField(const String &text, bool show) {
-  const int x = 8, y = 26, w = SCR_W - 16 - 56, h = 30;
+  const int x = 8, y = FIELD_Y, w = SCR_W - 16 - SX(56), h = FIELD_H;
   tft.fillSmoothRoundRect(x, y, w, h, 8, cKey, cBg);
   String vis = show ? text : String();
   if (!show) for (size_t i = 0; i < text.length(); i++) vis += '*';
-  tft.setTextFont(2);
+  tft.setTextFont(BIG ? 4 : 2);
   while (vis.length() && tft.textWidth(vis) > w - 20) vis.remove(0, 1);
   tft.setTextColor(cText);
   tft.setTextDatum(ML_DATUM);
   tft.drawString(vis + "_", x + 10, y + h / 2);
-  button(SCR_W - 60, y, 52, h, show ? "hide" : "show", cKeyHi, cText);
+  button(SCR_W - SX(60), y, SX(52), h, show ? "hide" : "show", cKeyHi, cText);
 }
 
 // Returns false on Cancel. `text` holds what was typed, kept across retries.
@@ -151,7 +159,7 @@ static bool keyboard(const char *title, const char *sub, String &text, bool secr
 
     int x, y;
     touchWaitTap(x, y);
-    if (inBox(x, y, SCR_W - 60, 26, 52, 30)) { show = !show; continue; }
+    if (inBox(x, y, SCR_W - SX(60), FIELD_Y, SX(52), FIELD_H)) { show = !show; continue; }
 
     for (int i = 0; i < n; i++) {
       const Key &k = keys[i];
@@ -179,9 +187,10 @@ static bool keyboard(const char *title, const char *sub, String &text, bool secr
 // ---------------------------------------------------------------- network list
 
 struct Net { char ssid[33]; int rssi; bool open; };
-#define LIST_Y0   30
-#define ROW_H     34
+#define LIST_Y0   (HEAD_H + 4)
+#define ROW_H     (BIG ? 46 : 34)
 #define ROWS_PG   5
+#define NAV_H     (BIG ? 44 : 32)
 
 static int scan(Net *nets, int max) {
   header("Choose WiFi", "scanning...");
@@ -224,7 +233,7 @@ static int pickNetwork(Net *nets, int n) {
       int i = page * ROWS_PG + r, y = LIST_Y0 + r * ROW_H;
       if (i > n) break;
       tft.fillSmoothRoundRect(8, y + 2, SCR_W - 16, ROW_H - 4, 8, cKey, cBg);
-      tft.setTextFont(2);
+      if (BIG) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
       tft.setTextDatum(ML_DATUM);
       if (i == n) {
         tft.setTextColor(cDim);
@@ -233,26 +242,26 @@ static int pickNetwork(Net *nets, int n) {
       }
       tft.setTextColor(cText);
       String s = nets[i].ssid;
-      while (s.length() > 1 && tft.textWidth(s) > 220) s.remove(s.length() - 1);
+      while (s.length() > 1 && tft.textWidth(s) > SCR_W - 100) s.remove(s.length() - 1);
       tft.drawString(s, 20, y + ROW_H / 2);
       tft.setTextFont(1);
       tft.setTextColor(cDim);
       tft.setTextDatum(MR_DATUM);
       if (nets[i].open) tft.drawString("open", SCR_W - 50, y + ROW_H / 2);
-      drawBars(SCR_W - 40, y + 10, nets[i].rssi);
+      drawBars(SCR_W - 40, y + (ROW_H - 14) / 2, nets[i].rssi);
     }
-    const int by = SCR_H - 38;
-    button(8, by, 70, 32, "< Prev", cKeyHi, page > 0 ? cText : cDim);
-    button(84, by, 70, 32, "Next >", cKeyHi, page < pages - 1 ? cText : cDim);
-    button(160, by, 72, 32, "Rescan", cKeyHi, cText);
-    button(238, by, 74, 32, "Cancel", cKeyHi, cText);
+    const int by = SCR_H - NAV_H - 6;
+    button(SX(8), by, SX(70), NAV_H, "< Prev", cKeyHi, page > 0 ? cText : cDim);
+    button(SX(84), by, SX(70), NAV_H, "Next >", cKeyHi, page < pages - 1 ? cText : cDim);
+    button(SX(160), by, SX(72), NAV_H, "Rescan", cKeyHi, cText);
+    button(SX(238), by, SX(74), NAV_H, "Cancel", cKeyHi, cText);
 
     int x, y;
     touchWaitTap(x, y);
     if (y >= by) {
-      if (x < 78)       { if (page > 0) page--; }
-      else if (x < 154) { if (page < pages - 1) page++; }
-      else if (x < 232) return -3;             // rescan
+      if (x < SX(78))       { if (page > 0) page--; }
+      else if (x < SX(154)) { if (page < pages - 1) page++; }
+      else if (x < SX(232)) return -3;         // rescan
       else              return -1;
       continue;
     }
@@ -288,14 +297,15 @@ static bool message(const char *title, const char *line, const char *ok, const c
   tft.setTextFont(2);
   tft.setTextColor(cText);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString(line, SCR_W / 2, 100);
-  button(40, 150, 110, 40, ok, cAccent, cBg);
-  if (cancel) button(170, 150, 110, 40, cancel, cKeyHi, cText);
+  tft.drawString(line, SCR_W / 2, SCR_H * 100 / 240);
+  const int by = SCR_H * 150 / 240, bw = SX(110), bh = BIG ? 52 : 40;
+  button(SX(40), by, bw, bh, ok, cAccent, cBg);
+  if (cancel) button(SX(170), by, bw, bh, cancel, cKeyHi, cText);
   for (;;) {
     int x, y;
     touchWaitTap(x, y);
-    if (inBox(x, y, 40, 150, 110, 40)) return true;
-    if (cancel && inBox(x, y, 170, 150, 110, 40)) return false;
+    if (inBox(x, y, SX(40), by, bw, bh)) return true;
+    if (cancel && inBox(x, y, SX(170), by, bw, bh)) return false;
   }
 }
 

@@ -29,6 +29,7 @@ static const char *LEGACY_ASSET = "claude-status-app.bin";
 
 const char *fwVersion() { return FW_VERSION[0] ? FW_VERSION : "dev"; }
 static const char *repo() { return UPDATE_REPO[0] ? UPDATE_REPO : DEFAULT_REPO; }
+const char *updateRepo() { return repo(); }
 
 static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cText, cDim, cAccent, cBad, cTrack;

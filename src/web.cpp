@@ -2,6 +2,7 @@
 #include "web_page.h"
 #include "model.h"
 #include "settings.h"
+#include "relay.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -66,15 +67,21 @@ static void sendError(int code, const char *msg) {
   sendJson(d, code);
 }
 
-static bool body(JsonDocument &d) {
-  if (deserializeJson(d, server.arg("plain"))) { sendError(400, "Bad request"); return false; }
-  return true;
+// Handlers answer the same whether the request came over HTTP (LAN or
+// hotspot) or through the relay: JSON in, JSON out, an HTTP status back.
+enum Via { VIA_LAN, VIA_HOTSPOT, VIA_RELAY };
+struct Ctx { Via via; bool authed; };
+typedef int (*Handler)(const Ctx &, JsonDocument &in, JsonDocument &out);
+
+static int fail(JsonDocument &out, int code, const char *msg) {
+  out.clear();
+  out["error"] = msg;
+  return code;
 }
 
-static bool requireAuth() {
-  if (authed()) return true;
-  sendError(401, "Enter the PIN from the display first");
-  return false;
+static int okReply(JsonDocument &out) {
+  out["ok"] = true;
+  return 200;
 }
 
 static void scheduleReboot() { rebootAt = millis() + 1500; }
@@ -88,12 +95,13 @@ static bool validAlias(const char *s) {
 
 // ---------------------------------------------------------------- handlers
 
-static void handleState() {
-  JsonDocument d;
+static int handleState(const Ctx &c, JsonDocument &, JsonDocument &d) {
   d["mode"]        = apMode ? "setup" : "lan";
-  d["via"]         = fromHotspot() ? "hotspot" : "lan";
+  d["via"]         = c.via == VIA_RELAY ? "relay" : c.via == VIA_HOTSPOT ? "hotspot" : "lan";
+  d["relay"]       = relayBrokerName();
+  d["relayCfg"]    = cfg.relay;
   d["hotspot"]     = hotspotUp ? webApSsid() : "";
-  d["authed"]      = authed();
+  d["authed"]      = c.authed;
   d["hostname"]    = cfg.hostname;
   d["ssid"]        = cfg.ssid;
   d["url"]         = webUrl();
@@ -106,7 +114,7 @@ static void handleState() {
   d["dimMinutes"]     = cfg.dimMinutes;
   d["maxAccounts"] = MAX_ACCOUNTS;
   d["pinPending"]  = pin[0] && millis() < pinUntil;
-  if (authed()) {
+  if (c.authed) {
     String pAlias, pUrl;
     if (apiSigninPending(pAlias, pUrl)) { d["pending"]["alias"] = pAlias; d["pending"]["url"] = pUrl; }
     JsonArray list = d["accounts"].to<JsonArray>();
@@ -127,7 +135,7 @@ static void handleState() {
       }
     }
   }
-  sendJson(d);
+  return 200;
 }
 
 static void handlePinRequest() {
@@ -144,7 +152,7 @@ static void handlePinRequest() {
 
 static void handlePinVerify() {
   JsonDocument in;
-  if (!body(in)) return;
+  if (deserializeJson(in, server.arg("plain"))) { sendError(400, "Bad request"); return; }
   const char *given = in["pin"] | "";
   if (!pin[0] || millis() > pinUntil) { sendError(400, "No PIN is showing; request a new one"); return; }
   if (strcmp(given, pin) != 0) {
@@ -162,10 +170,8 @@ static void handlePinVerify() {
   sendJson(d);
 }
 
-static void handleScan() {
-  if (!requireAuth()) return;
+static int handleScan(const Ctx &, JsonDocument &, JsonDocument &d) {
   int n = WiFi.scanNetworks(false, false);
-  JsonDocument d;
   JsonArray list = d["networks"].to<JsonArray>();
   for (int i = 0; i < n; i++) {
     String s = WiFi.SSID(i);
@@ -179,20 +185,17 @@ static void handleScan() {
     o["open"] = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
   }
   WiFi.scanDelete();
-  sendJson(d);
+  return 200;
 }
 
-static void handleWifi() {
-  if (!requireAuth()) return;
-  JsonDocument in;
-  if (!body(in)) return;
+static int handleWifi(const Ctx &, JsonDocument &in, JsonDocument &out) {
   const char *ssid = in["ssid"] | "";
   const char *host = in["hostname"] | cfg.hostname;
-  if (!ssid[0] || strlen(ssid) > 32) { sendError(400, "Pick a network"); return; }
-  if (strlen(in["password"] | "") > 64) { sendError(400, "Password too long"); return; }
+  if (!ssid[0] || strlen(ssid) > 32) return fail(out, 400, "Pick a network");
+  if (strlen(in["password"] | "") > 64) return fail(out, 400, "Password too long");
   bool hostOk = strlen(host) >= 1 && strlen(host) <= 32;
   for (const char *p = host; *p; p++) if (!isalnum((unsigned char)*p) && *p != '-') hostOk = false;
-  if (!hostOk) { sendError(400, "Device name: letters, digits and '-' only"); return; }
+  if (!hostOk) return fail(out, 400, "Device name: letters, digits and '-' only");
 
   strlcpy(cfg.ssid, ssid, sizeof(cfg.ssid));
   strlcpy(cfg.pass, in["password"] | "", sizeof(cfg.pass));
@@ -200,58 +203,43 @@ static void handleWifi() {
   if (in["hosting"].is<bool>()) cfg.hosting = in["hosting"];
   settingsSave();
   Serial.printf("[web] WiFi set to '%s', rebooting\n", cfg.ssid);
-  JsonDocument d;
-  d["ok"] = true;
-  sendJson(d);
   scheduleReboot();
+  return okReply(out);
 }
 
-static void handleSigninStart() {
-  if (!requireAuth()) return;
-  if (apMode) { sendError(400, "Join your WiFi first"); return; }
-  JsonDocument in;
-  if (!body(in)) return;
+static int handleSigninStart(const Ctx &, JsonDocument &in, JsonDocument &d) {
+  if (apMode) return fail(d, 400, "Join your WiFi first");
   const char *alias = in["alias"] | "";
-  if (!validAlias(alias)) { sendError(400, "Name: 1-23 letters, digits, '_', '.', '-'"); return; }
-  if (settingsFindAccount(alias) < 0 && cfg.nAccounts >= MAX_ACCOUNTS) {
-    sendError(400, "Already at the maximum of 4 accounts");
-    return;
-  }
-  JsonDocument d;
+  if (!validAlias(alias)) return fail(d, 400, "Name: 1-23 letters, digits, '_', '.', '-'");
+  if (settingsFindAccount(alias) < 0 && cfg.nAccounts >= MAX_ACCOUNTS)
+    return fail(d, 400, "Already at the maximum of 4 accounts");
   d["url"] = apiSigninStart(alias, in["models"] | "");
-  sendJson(d);
+  return 200;
 }
 
-static void handleSigninFinish() {
-  if (!requireAuth()) return;
-  JsonDocument in;
-  if (!body(in)) return;
+static int handleSigninFinish(const Ctx &, JsonDocument &in, JsonDocument &d) {
   String err, email;
-  if (!apiSigninFinish(in["code"] | "", err, email)) { sendError(400, err.c_str()); return; }
+  if (!apiSigninFinish(in["code"] | "", err, email)) return fail(d, 400, err.c_str());
   webWantsCheck = true;
-  JsonDocument d;
   d["email"] = email;
-  sendJson(d);
+  return 200;
 }
 
-static void handleRemove() {
-  if (!requireAuth()) return;
-  JsonDocument in;
-  if (!body(in)) return;
+static int handleRemove(const Ctx &, JsonDocument &in, JsonDocument &out) {
   int i = settingsFindAccount(in["alias"] | "");
-  if (i < 0) { sendError(404, "No such account"); return; }
+  if (i < 0) return fail(out, 404, "No such account");
   settingsRemoveAccount(i);
   apiSyncAccounts();
   webWantsCheck = true;
-  JsonDocument d;
-  d["ok"] = true;
-  sendJson(d);
+  return okReply(out);
 }
 
-static void handleSettings() {
-  if (!requireAuth()) return;
-  JsonDocument in;
-  if (!body(in)) return;
+static int handleSettings(const Ctx &, JsonDocument &in, JsonDocument &out) {
+  if (in["relay"].is<const char *>()) {
+    const char *r = in["relay"];
+    if (!relayConfigValid(r)) return fail(out, 400, "Relay: empty, hivemq, mosquitto, or host:port|wss://url");
+    strlcpy(cfg.relay, r, sizeof(cfg.relay));
+  }
   if (in["pageSeconds"].is<int>())    cfg.pageSeconds    = constrain(in["pageSeconds"].as<int>(), 0, 3600);
   if (in["refreshMinutes"].is<int>()) cfg.refreshMinutes = constrain(in["refreshMinutes"].as<int>(), 1, 240);
   if (in["brightness"].is<int>())     cfg.brightness     = constrain(in["brightness"].as<int>(), 5, 100);
@@ -259,26 +247,53 @@ static void handleSettings() {
   if (in["dimMinutes"].is<int>())     cfg.dimMinutes     = constrain(in["dimMinutes"].as<int>(), 0, 120);
   if (in["hosting"].is<bool>())    cfg.hosting = in["hosting"];
   settingsSave();
-  JsonDocument d;
-  d["ok"] = true;
-  sendJson(d);
+  return okReply(out);
 }
 
-static void handleReboot() {
-  if (!requireAuth()) return;
-  JsonDocument d;
-  d["ok"] = true;
-  sendJson(d);
+static int handleReboot(const Ctx &, JsonDocument &, JsonDocument &out) {
   scheduleReboot();
+  return okReply(out);
 }
 
-static void handleReset() {
-  if (!requireAuth()) return;
+static int handleReset(const Ctx &, JsonDocument &, JsonDocument &out) {
   settingsFactoryReset();
-  JsonDocument d;
-  d["ok"] = true;
-  sendJson(d);
   scheduleReboot();
+  return okReply(out);
+}
+
+struct Route { HTTPMethod method; const char *path; Handler h; bool auth; };
+static const Route ROUTES[] = {
+  {HTTP_GET,  "/api/state",          handleState,        false},
+  {HTTP_GET,  "/api/wifi/scan",      handleScan,         true},
+  {HTTP_POST, "/api/wifi",           handleWifi,         true},
+  {HTTP_POST, "/api/signin/start",   handleSigninStart,  true},
+  {HTTP_POST, "/api/signin/finish",  handleSigninFinish, true},
+  {HTTP_POST, "/api/account/remove", handleRemove,       true},
+  {HTTP_POST, "/api/settings",       handleSettings,     true},
+  {HTTP_POST, "/api/reboot",         handleReboot,       true},
+  {HTTP_POST, "/api/reset",          handleReset,        true},
+};
+
+static int runRoute(const Route &r, const Ctx &c, JsonDocument &in, JsonDocument &out) {
+  if (r.auth && !c.authed) return fail(out, 401, "Enter the PIN from the display first");
+  return r.h(c, in, out);
+}
+
+static void serveHttp(const Route &r) {
+  Ctx c = {fromHotspot() ? VIA_HOTSPOT : VIA_LAN, authed()};
+  JsonDocument in, out;
+  if (r.method == HTTP_POST && deserializeJson(in, server.arg("plain"))) { sendError(400, "Bad request"); return; }
+  int code = runRoute(r, c, in, out);
+  sendJson(out, code);
+}
+
+// The relay's way in. Whoever holds the relay's key read it off the display,
+// so they are trusted like someone on the board's hotspot.
+int webApiCall(const char *method, const char *path, JsonDocument &in, JsonDocument &out) {
+  HTTPMethod m = !strcmp(method, "POST") ? HTTP_POST : HTTP_GET;
+  for (const Route &r : ROUTES)
+    if (r.method == m && !strcmp(r.path, path)) return runRoute(r, {VIA_RELAY, true}, in, out);
+  return fail(out, 404, "Not found");
 }
 
 // Phones probe a few URLs to detect a captive portal; sending everything to
@@ -301,17 +316,9 @@ static void routes() {
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "text/html", WEB_PAGE);
   });
-  server.on("/api/state",          HTTP_GET,  handleState);
   server.on("/api/pin/request",    HTTP_POST, handlePinRequest);
   server.on("/api/pin/verify",     HTTP_POST, handlePinVerify);
-  server.on("/api/wifi/scan",      HTTP_GET,  handleScan);
-  server.on("/api/wifi",           HTTP_POST, handleWifi);
-  server.on("/api/signin/start",   HTTP_POST, handleSigninStart);
-  server.on("/api/signin/finish",  HTTP_POST, handleSigninFinish);
-  server.on("/api/account/remove", HTTP_POST, handleRemove);
-  server.on("/api/settings",       HTTP_POST, handleSettings);
-  server.on("/api/reboot",         HTTP_POST, handleReboot);
-  server.on("/api/reset",          HTTP_POST, handleReset);
+  for (const Route &r : ROUTES) server.on(r.path, r.method, [&r] { serveHttp(r); });
   server.onNotFound(handleNotFound);
 }
 
@@ -373,11 +380,11 @@ void webStartSetupAP() {
 }
 
 void webLoop() {
+  if (rebootAt && millis() > rebootAt) ESP.restart();   // also for relay requests
   if (!active) return;
   if (apMode) dns.processNextRequest();
   server.handleClient();
   if (pin[0] && millis() > pinUntil) { pin[0] = 0; uiHidePin(); }
-  if (rebootAt && millis() > rebootAt) ESP.restart();
   // Stays up while anyone is using it, and always while there's no account.
   if (hotspotUp && accountCount > 0 && WiFi.softAPgetStationNum() == 0 &&
       millis() - hotspotSeen > HOTSPOT_IDLE_MS)

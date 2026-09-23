@@ -17,6 +17,7 @@
 #include "update.h"
 #include "input.h"
 #include "board.h"
+#include "relay.h"
 #include <WiFi.h>
 #include <TFT_eSPI.h>
 
@@ -131,12 +132,40 @@ static String statsSignature() {
 
 // ---------------------------------------------------------------- input
 
+// Relay: works anywhere. Address: only if the phone can see the board, which
+// guest networks prevent. Hotspot: the phone joins the board itself.
+static void phoneSetup() {
+  bool guest = String(wifiLink.ssid).indexOf("uest") >= 0;   // Guest, guest
+  String lanNote = guest ? String("!'") + wifiLink.ssid + "' looks like guest WiFi: likely blocked"
+                         : String("!Phone must be on ") + wifiLink.ssid + ". Guest WiFi blocks it";
+  const char *labels[] = {"Remote link (any network)", "This network (IP address)", "Board hotspot", "Cancel"};
+  const char *subs[]   = {"One-time encrypted link through a relay", lanNote.c_str(),
+                          "Your phone joins the board's own WiFi", ""};
+  switch (uiChoose("Phone setup", labels, subs, 4)) {
+    case 0:
+      relayStart();
+      uiShowRemote();
+      break;
+    case 1:
+      if (!wifiLink.up) { uiCloseOverlay(); break; }
+      webStartLan();
+      strlcpy(wifiLink.url, webUrl().c_str(), sizeof(wifiLink.url));
+      uiShowLan(wifiLink.url);
+      break;
+    case 2:
+      webStartHotspot();
+      uiShowHotspot(webApSsid(), webApPass(), webHotspotUrl().c_str());
+      break;
+    default:
+      uiCloseOverlay();
+  }
+}
+
 static void menuAction(MenuAction act) {
   Serial.printf("[menu] %d\n", (int)act);
   switch (act) {
-    case MA_PHONE:        // phone setup page, over the board's own hotspot
-      webStartHotspot();
-      uiShowHotspot(webApSsid(), webApPass(), webHotspotUrl().c_str());
+    case MA_PHONE:        // the setup page, three ways to reach it
+      phoneSetup();
       break;
     case MA_WIFI_SCREEN:  // WiFi on the touchscreen; accounts and logins untouched
       if (screenWifiSetup()) {
@@ -153,6 +182,7 @@ static void menuAction(MenuAction act) {
       ESP.restart();
       break;
     case MA_UPDATE:       // firmware from GitHub releases
+      relayStop();                            // its TLS memory goes to the download
       screenFirmwareUpdate();
       uiCloseOverlay();
       break;
@@ -216,7 +246,9 @@ static void handleInput() {
       if (HAS_TOUCHSCREEN) { MenuAction a = uiMenuHit(e.x, e.y); if (a != MA_NONE) menuAction(a); }
       else                 uiMenuNext();
       return;
-    case OV_HOTSPOT: uiCloseOverlay(); return;
+    case OV_HOTSPOT:
+    case OV_REMOTE:
+    case OV_LAN:     uiCloseOverlay(); return;
     case OV_PIN:     return;
   }
 
@@ -276,6 +308,7 @@ static void maybeStartWeb() {
   // No account yet, or no way to ask for it on the board: offer the hotspot.
   // webLoop() drops it after 15 idle minutes once an account exists.
   static bool offered = false;
+  if (accountCount == 0 && relayState() == RELAY_OFF) relayStart();   // shown on the empty screen
   if ((accountCount == 0 || (!HAS_INPUT && !offered)) && !webHotspotUp()) {
     webStartHotspot();
     offered = true;
@@ -376,6 +409,12 @@ void loop() {
   if (setupMode) { setupModeTouch(); delay(2); return; }
 
   uint32_t now = millis();
+  relayLoop();
+  static RelayState shown = RELAY_OFF;       // redraw the QR screens as the relay comes up
+  if (relayState() != shown) {
+    shown = relayState();
+    if (uiOverlay() == OV_REMOTE || (accountCount == 0 && uiOverlay() == OV_NONE)) uiDrawAll();
+  }
   maybeStartWeb();
   if (webWantsCheck) {          // an account was added or removed on the page
     webWantsCheck = false;

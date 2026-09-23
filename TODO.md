@@ -32,6 +32,12 @@
 - [ ] Check taps land correctly with the built-in defaults, and after a
       calibration run.
 
+## Remote setup relay
+
+- [x] Relay over HiveMQ and Mosquitto, tested from a guest network; replays dropped.
+- [ ] Watch the public brokers' reliability; add a self-hosted option to the docs if they flake.
+- [ ] Sign-in flow end to end over the relay on a phone.
+
 ## LCDWiki 4.0" E32R40T
 
 - [x] Pins from the factory test firmware (disassembly), matching LCDWiki's table.
