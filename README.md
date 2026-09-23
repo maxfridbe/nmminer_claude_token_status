@@ -171,25 +171,94 @@ writes around it.
 
 #### Remote link
 
-The QR code opens the setup page hosted on this repository's GitHub Pages
-(`https://<owner>.github.io/<repo>/`). Everything after the `#` in the link,
-which browsers never send to a server, is a random room name and a fresh
-AES-128 key. The board and the page swap the setup page's usual requests over
-a public MQTT server, sealed with AES-GCM under that key, so the server sees
-only ciphertext. Each request carries a rising counter, and the board drops
-any copy replayed by someone watching the server.
+Guest networks keep the devices on them apart, so a phone can't open a page
+on the board. Both can still reach the internet, though, so the remote link
+has both of them connect out to a public relay server, which passes messages
+between them. The relay never learns what the messages say.
 
-The link is new every time the relay starts and dies after 15 idle minutes.
-It also stays up while the board has no account. Whoever scans the code gets
-the same access as someone on the board's hotspot, so treat the QR on the
-screen like a password.
+**The flow, step by step**
 
-Relay servers: by default HiveMQ's public broker, then Mosquitto's test
+1. **The board opens the relay.** It connects to a public MQTT server over
+   TLS (HiveMQ, or Mosquitto if HiveMQ is unreachable). It picks a random
+   64-bit *room* and generates a fresh 128-bit AES key. It subscribes to the
+   room's request topic, `cs1/<room>/q`.
+2. **The screen shows a QR code** for
+   `https://<owner>.github.io/<repo>/#r=<room>&k=<key>&b=<server>`. The page
+   lives on this repository's GitHub Pages. The part after `#` is the URL
+   *fragment*, which browsers keep to themselves: GitHub never sees the room
+   or the key.
+3. **The phone opens the page.** It's the same setup page the board serves on
+   its hotspot, plus a small transport script. It reads the room, key and
+   server from the fragment, connects to the same MQTT server over a secure
+   WebSocket, and subscribes to the reply topic, `cs1/<room>/a`.
+4. **Each tap on the page becomes one sealed request.** For example, *load
+   state*, *scan WiFi*, *add account* or *save settings*. The request is
+   `{n, method, path, body}`, where `n` is a counter that only ever rises.
+   It's encrypted with AES-128-GCM under the key and a fresh 96-bit IV, then
+   published to the request topic as `IV | ciphertext | tag`. The associated
+   data binds each message to its direction and room, so a reply can't be
+   passed off as a request, or moved to another room.
+5. **The board decrypts and checks it.** It drops anything that fails
+   authentication or whose counter isn't higher than the last one it
+   accepted, which stops replays. It then runs the request through the same
+   handlers as the hotspot and LAN page (`webApiCall`). The answer
+   `{n, status, body}` is sealed the same way and published to the reply
+   topic. The page matches it to its request by `n`.
+6. **Signing in to Claude works as it does on the hotspot.** The page asks
+   the board to start a sign-in and opens claude.ai's approval page. Your
+   phone has internet the whole time, so there's no network switching. You
+   paste the code back, and the board exchanges it with Claude for its own
+   login. The board has room for only one TLS session at a time, so it
+   briefly drops the relay connection for that exchange (and for its usage
+   checks). It reconnects to the same room with the same key and then sends
+   the answer. That's why **Finish** can take 10-20 seconds.
+7. **The link expires.** The board closes the relay 15 minutes after the
+   last request. It also discards the key when the relay stops or the board
+   restarts. The next remote link gets a new room and key. While the board
+   has no account, the relay stays up so the QR code on the screen keeps
+   working.
+
+```mermaid
+sequenceDiagram
+    participant P as Phone (GitHub Pages)
+    participant M as MQTT relay (HiveMQ / Mosquitto)
+    participant B as Board
+    B->>M: TLS :8883, subscribe cs1/room/q
+    Note over B: QR shows page#35;r=room&k=key&b=server
+    P->>M: WSS :8884, subscribe cs1/room/a
+    P->>M: publish cs1/room/q  AES-GCM{n, GET /api/state}
+    M->>B: (ciphertext)
+    B->>B: decrypt, check n > last, run handler
+    B->>M: publish cs1/room/a  AES-GCM{n, 200, state}
+    M->>P: (ciphertext)
+```
+
+**Technologies**
+
+| Piece | Board | Phone |
+|---|---|---|
+| Transport | MQTT 3.1.1 over TLS ([PubSubClient](https://github.com/knolleary/pubsubclient) on `WiFiClientSecure`), port 8883 (HiveMQ) or 8886 (Mosquitto) | MQTT 3.1.1 over a secure WebSocket (`wss://`), a ~100-line client in `web/relay.js`, no libraries |
+| Server trust | TLS verified against pinned roots in `RELAY_ROOTS` (`include/certs.h`): Amazon Root CA 1 and Starfield G2 for HiveMQ, ISRG Root X1 for Mosquitto | the browser's own TLS checks |
+| Encryption | AES-128-GCM via mbedtls, part of the ESP32 core | AES-128-GCM via the browser's WebCrypto (`crypto.subtle`) |
+| Messages | QoS 0 (no retained messages or sessions); nothing is stored on the relay | same |
+| Replay protection | rising counter per room; lower or repeated values are dropped | the counter starts from the current time in milliseconds, so it keeps rising across page reloads |
+| Hosting | none: the board only connects out | GitHub Pages, published by `.github/workflows/pages.yml` from `src/web_page.h` + `web/relay.js` (`tools/build_pages.py`) |
+| Page lockdown | | a Content-Security-Policy that allows only the page's own inline code and connections to `wss:` servers |
+
+**What each party sees.** The relay operator sees two anonymous clients
+exchanging ciphertext on a random topic for a few minutes. GitHub serves a
+static page and never sees the fragment. Anyone who photographs the QR code
+gets the same access as someone who joins the board's hotspot, until the
+link expires. So treat the code on the screen like a password. The page
+never shows tokens. Claude's sign-in code is useless without the PKCE
+verifier, which never leaves the board.
+
+**Relay servers.** By default HiveMQ's public broker, then Mosquitto's test
 server if HiveMQ is down. Both are free and best-effort. To pin one, or to
 use your own, set **Relay server** on the setup page: `hivemq`, `mosquitto`,
 or `host:tlsport|wss://host:port/path`. Your own server's certificate must
-chain to a root in `RELAY_ROOTS` (`include/certs.h`), which covers Let's
-Encrypt.
+chain to a root in `RELAY_ROOTS`, which covers Let's Encrypt. Its WebSocket
+listener must accept the `mqtt` subprotocol.
 
 #### Board hotspot
 
