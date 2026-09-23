@@ -25,6 +25,23 @@
   #define BUTTON_ACTIVE     HIGH     // digital mode only
   #endif
 
+#elif defined(BOARD_E32R40T)
+// LCDWiki 4.0" ESP32-32E display, E32R40T (the E32N40T is the same board
+// without touch): ESP32-WROOM-32E, 480x320 ST7796, XPT2046 resistive touch on
+// the display bus. Pins were first read out of the factory test firmware by
+// disassembly, then matched against LCDWiki's table: SPI 14/12/13, LCD CS 15,
+// DC 2, reset tied to EN, backlight 27 (high = on), touch CS 33.
+  #define BOARD_ID          "e32r40t"
+  #define BOARD_NAME        "E32R40T 4.0in"
+  #define SCR_W             480
+  #define SCR_H             320
+  #define TFT_ROTATION      1
+  #define HAS_TOUCHSCREEN   1
+  #define TOUCH_VIA_TFT     1
+  #define TOUCH_CAL_DEFAULT {295, 3614, 269, 3492, 7}   // measured on one unit
+  #define BL_ACTIVE_LOW     0
+  #define PANEL_POWER_PIN   -1
+
 #elif defined(BOARD_CROW28)
 // CrowPanel "ESP32 Miner LCD-2.8 inch" (SKU DHM04728D): classic ESP32,
 // 240x320 ILI9341 on the same SPI pins as the CYD, backlight on GPIO 27.

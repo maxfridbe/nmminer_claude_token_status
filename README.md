@@ -1,8 +1,8 @@
 # claude-status
 
-A desk display for Claude usage limits on NMMiner-style ESP32 boards: the 2.8"
-"Cheap Yellow Display", the CrowPanel 2.8" miner LCD, or the 1.54" NM-TV with
-a single touch button. It shows the session window and per-model weekly limits for up to four
+A desk display for Claude usage limits on ESP32 display boards: the 2.8"
+"Cheap Yellow Display", the CrowPanel 2.8" miner LCD, LCDWiki's 4.0" E32R40T,
+or the 1.54" NM-TV with a single touch button. It shows the session window and per-model weekly limits for up to four
 Claude accounts, checking every 15 minutes.
 
 Set it up on the touchscreen and your phone (join its hotspot, sign in to
@@ -37,6 +37,7 @@ The layout follows the number of accounts:
 |---|---|---|---|---|
 | ESP32-2432S028 "Cheap Yellow Display" | `cyd` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
 | CrowPanel ESP32 Miner LCD 2.8" (SKU DHM04728D) | `crow28` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
+| LCDWiki 4.0" ESP32-32E display (E32R40T) | `e32r40t` | 4.0" 480x320 ST7796 | resistive touchscreen | tested |
 | NMMiner NM-TV 1.54" | `nmtv` | 1.54" 240x240 ST7789 | one touch button on top | **untested**: built from NMTech's published pins, not yet run on the hardware |
 
 All are classic ESP32 boards; everything but the screen and input is shared.
@@ -64,6 +65,38 @@ never been set up offers it at boot and waits 60 seconds; after that it waits
 and updates. Skip it and the board's built-in defaults are used. To redo it:
 hold the screen, then **Calibrate touch**. If nobody touches the screen, it
 always moves on, so a board with broken touch still boots.
+
+### LCDWiki 4.0" ESP32-32E (E32R40T)
+
+A 4.0" 480x320 board on an ESP32-WROOM-32E, sold as the **E32R40T** (the
+**E32N40T** is the same board without touch). The layout is the CYD's, scaled
+up, and each pane is drawn in two halves so the off-screen buffer stays small.
+
+| Function | Pin |
+|---|---|
+| LCD SPI SCK / MOSI / MISO | 14 / 13 / 12 (shared with touch) |
+| LCD CS / DC | 15 / 2 |
+| LCD reset | tied to the ESP32's EN |
+| Backlight | 27, high = on |
+| Touch (XPT2046) CS / IRQ | 33 / 36 |
+| RGB LED | 22 / 16 / 17, low = on |
+| Audio enable / output | 4 (low = on) / 26 |
+| SD card | CS 5, SPI 18 / 23 / 19 |
+| Battery voltage | 34 |
+
+**How it was identified.** The unit had no markings. Its stock firmware was
+backed up and turned out to be LCDWiki's factory test app, whose strings
+("LCD ID is not 0x7796!!!", "KEY and LED test, Please press BOOT Key!",
+"Audio Test", "SD card Test") gave away the ST7796 panel and the product. The
+pins were then read out of the app by disassembly: the display's
+`spi.begin(14, 12, 13)`, `pinMode`/`digitalWrite` on 15, 2 and 27, and 33 for
+touch. They match LCDWiki's published table exactly.
+
+**How to recognise one.** A 4.0" 480x320 screen on an ESP32-WROOM-32E, with an
+RGB LED, speaker header, SD slot and battery connector. Reading the display ID
+(command 0xD3) returns 0x7796 (the 2.8" boards return 0x9341).
+
+Touch is calibrated at first boot, like the CrowPanel.
 
 ### NM-TV: the non-touchscreen option
 
@@ -141,7 +174,7 @@ Press and hold the screen for about 1.5 seconds:
 | WiFi on this screen | pick a network and type its password on the keyboard |
 | WiFi with a phone | restarts into the setup hotspot |
 | Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
-| Calibrate touch | touchscreens that need it (CrowPanel): touch each corner arrow |
+| Calibrate touch | touchscreens that need it (CrowPanel, E32R40T): touch each corner arrow |
 | Wipe all settings | erases WiFi, accounts and logins after a confirmation, then restarts into first-time setup |
 | Restart / Close | |
 
@@ -305,7 +338,7 @@ deploy, run `tools/scope_test.py <alias>`.
 | `deploy_and_build.sh` | build from source and flash, from a config file or generic |
 | `tools/make_release.sh` | builds each board's generic images into `firmware/` |
 | `src/board.h` | per-board screen, backlight and input settings |
-| `src/probe/` | bring-up firmware: the NM-TV's button, the CrowPanel's touch |
+| `src/probe/` | bring-up firmware: the NM-TV's button, the CrowPanel's touch, the E32R40T's display |
 | `src/input.cpp` | touchscreen or single button, as taps, holds and swipes |
 | `src/probe/probe.cpp` | NM-TV button finder (`env:nmtv-probe`) |
 | `.github/workflows/release.yml` | builds that image on GitHub and publishes it for each `v*` tag |

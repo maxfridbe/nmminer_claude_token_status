@@ -27,19 +27,40 @@ extern TFT_eSPI tft;
 #endif
 #define PAD    12
 
+#define RING_A0  30     // TFT_eSPI arcs: 0 deg at 6 o'clock, clockwise
+#define RING_A1  330
+#define MAX_ROWS 2
+
+// 480x320 screens get the same layout, scaled up, and render each pane in
+// two halves so the off-screen buffer stays small next to TLS.
+#define BIG_SCREEN (SCR_H >= 320)
+#if BIG_SCREEN
+#define NAME_Y   24
+#define PLAN_Y   48
+#define RING_CY  132
+#define RING_R   62
+#define RING_IR  48
+#define RESET_Y  212
+#define WEEK_Y   230
+#define ROW_Y0   244
+#define ROW_H    36
+#define BAR_H    11
+#define RING_FONT  (&FreeSansBold24pt7b)
+#define RING_LABEL 26
+#else
 #define NAME_Y   18
 #define PLAN_Y   38
 #define RING_CY  98
 #define RING_R   44
 #define RING_IR  34
-#define RING_A0  30     // TFT_eSPI arcs: 0 deg at 6 o'clock, clockwise
-#define RING_A1  330
 #define RESET_Y  154
 #define WEEK_Y   168              // thin week-progress bar under the reset line
 #define ROW_Y0   178
 #define ROW_H    31
-#define MAX_ROWS 2
 #define BAR_H    9                // odd, so the round caps center on a pixel
+#define RING_FONT  (&FreeSansBold18pt7b)
+#define RING_LABEL 17
+#endif
 
 static uint16_t rgb(uint32_t hex) {
   return tft.color565((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF);
@@ -70,6 +91,10 @@ void uiInit() {
   colSpr.setColorDepth(16);
 #if SQUARE_SCREEN
   haveColSpr = colSpr.createSprite(SCR_W, SCR_H / 2) != nullptr;   // drawn in two halves
+#elif BIG_SCREEN
+  haveColSpr = colSpr.createSprite(COL_W, SCR_H / 2) != nullptr;   // drawn in two halves
+  linkSpr.setColorDepth(16);
+  haveLinkSpr = linkSpr.createSprite(LINK_W, SCR_H) != nullptr;
 #else
   haveColSpr = colSpr.createSprite(COL_W, SCR_H) != nullptr;
   linkSpr.setColorDepth(16);
@@ -203,18 +228,18 @@ static const Bucket *sessionOf(const Account &a) {
 }
 
 // Mark and name, plan beneath.
-static void drawHeader(TFT_eSPI &g, int ox, const Account &a, int maxW) {
-  drawMark(g, ox + PAD, NAME_Y - 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+static void drawHeader(TFT_eSPI &g, int ox, int oy, const Account &a, int maxW) {
+  drawMark(g, ox + PAD, oy + NAME_Y - 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
   // Long names drop to the smaller font before anything gets cut off.
   const int nameW = maxW - PAD * 2 - 24;
   g.setFreeFont(&FreeSansBold9pt7b);
   if (g.textWidth(a.label) > nameW) g.setTextFont(2);
   g.setTextColor(C_TEXT);
   g.setTextDatum(ML_DATUM);
-  g.drawString(fit(g, a.label, nameW), ox + PAD + 24, NAME_Y);
+  g.drawString(fit(g, a.label, nameW), ox + PAD + 24, oy + NAME_Y);
   g.setTextFont(2);
   g.setTextColor(C_DIM);
-  g.drawString(a.plan, ox + PAD + 24, PLAN_Y);
+  g.drawString(a.plan, ox + PAD + 24, oy + PLAN_Y);
 }
 
 static void drawRing(TFT_eSPI &g, int cx, int cy, int r, int ir, const Bucket *s, bool stale,
@@ -278,31 +303,31 @@ static void drawWeekBar(TFT_eSPI &g, int x0, int x1, int y, const Account &a) {
   if (fw > 0) g.fillRoundRect(x0, y, max(fw, 3), 3, 1, C_DIM);
 }
 
-static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
+static void drawColumn(TFT_eSPI &g, int ox, int oy, const Account &a, bool ruleRight) {
   const int cx = ox + COL_W / 2;
   const bool stale = !a.ok && a.everOk;
   const Bucket *s = sessionOf(a);
 
-  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
-  if (ruleRight) g.drawFastVLine(ox + COL_W - 1, 14, SCR_H - 28, C_RULE);
+  g.fillRect(ox, oy, COL_W, SCR_H, C_BG);
+  if (ruleRight) g.drawFastVLine(ox + COL_W - 1, oy + 14, SCR_H - 28, C_RULE);
 
-  drawHeader(g, ox, a, COL_W);
-  drawRing(g, cx, RING_CY, RING_R, RING_IR, s, stale, &FreeSansBold18pt7b, 17);
-  drawResetLine(g, cx, RESET_Y, COL_W - PAD * 2, a, s);
-  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, WEEK_Y, a);
+  drawHeader(g, ox, oy, a, COL_W);
+  drawRing(g, cx, oy + RING_CY, RING_R, RING_IR, s, stale, RING_FONT, RING_LABEL);
+  drawResetLine(g, cx, oy + RESET_Y, COL_W - PAD * 2, a, s);
+  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, oy + WEEK_Y, a);
 
   int first = s ? 1 : 0;
   int no = a.everOk ? a.nBuckets - first : 0;
   int shown = no <= MAX_ROWS ? no : MAX_ROWS - 1;
   for (int r = 0; r < shown; r++)
-    drawRow(g, ox, ROW_Y0 + r * ROW_H, a.buckets[first + r], stale);
+    drawRow(g, ox, oy + ROW_Y0 + r * ROW_H, a.buckets[first + r], stale);
   if (no > shown) {
     char more[20];
     snprintf(more, sizeof(more), "+%d more", no - shown);
     g.setTextFont(2);
     g.setTextColor(C_DIM);
     g.setTextDatum(TL_DATUM);
-    g.drawString(more, ox + PAD, ROW_Y0 + shown * ROW_H);
+    g.drawString(more, ox + PAD, oy + ROW_Y0 + shown * ROW_H);
   }
 }
 
@@ -310,6 +335,17 @@ static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
 
 // One account uses the whole screen, drawn as two column-sized panes: a big
 // session ring on the left, roomier model meters on the right.
+#if BIG_SCREEN
+#define WIDE_RING_CY 160
+#define WIDE_RING_R  84
+#define WIDE_RING_IR 64
+#define WIDE_RESET_Y 268
+#define WIDE_WEEK_Y  290
+#define WIDE_ROW_Y0  36
+#define WIDE_ROW_H   66
+#define WIDE_ROWS    4
+#define WIDE_BAR_H   13
+#else
 #define WIDE_RING_CY 124
 #define WIDE_RING_R  60
 #define WIDE_RING_IR 46
@@ -319,15 +355,16 @@ static void drawColumn(TFT_eSPI &g, int ox, const Account &a, bool ruleRight) {
 #define WIDE_ROW_H   50
 #define WIDE_ROWS    4
 #define WIDE_BAR_H   11
+#endif
 
-static void drawWideLeft(TFT_eSPI &g, int ox, const Account &a) {
+static void drawWideLeft(TFT_eSPI &g, int ox, int oy, const Account &a) {
   const bool stale = !a.ok && a.everOk;
   const Bucket *s = sessionOf(a);
-  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
-  drawHeader(g, ox, a, COL_W);
-  drawRing(g, ox + COL_W / 2, WIDE_RING_CY, WIDE_RING_R, WIDE_RING_IR, s, stale, &FreeSansBold24pt7b, 26);
-  drawResetLine(g, ox + COL_W / 2, WIDE_RESET_Y, COL_W - PAD, a, s);
-  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, WIDE_WEEK_Y, a);
+  g.fillRect(ox, oy, COL_W, SCR_H, C_BG);
+  drawHeader(g, ox, oy, a, COL_W);
+  drawRing(g, ox + COL_W / 2, oy + WIDE_RING_CY, WIDE_RING_R, WIDE_RING_IR, s, stale, &FreeSansBold24pt7b, 26);
+  drawResetLine(g, ox + COL_W / 2, oy + WIDE_RESET_Y, COL_W - PAD, a, s);
+  drawWeekBar(g, ox + PAD, ox + COL_W - PAD, oy + WIDE_WEEK_Y, a);
 }
 
 static void drawWideRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale) {
@@ -358,13 +395,13 @@ static void drawWideRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale)
   g.drawString(fit(g, note, x1 - x0), x0, y + 38);
 }
 
-static void drawWideRight(TFT_eSPI &g, int ox, const Account &a) {
+static void drawWideRight(TFT_eSPI &g, int ox, int oy, const Account &a) {
   const bool stale = !a.ok && a.everOk;
-  g.fillRect(ox, 0, COL_W, SCR_H, C_BG);
+  g.fillRect(ox, oy, COL_W, SCR_H, C_BG);
   int first = sessionOf(a) ? 1 : 0;
   int no = a.everOk ? a.nBuckets - first : 0;
   for (int r = 0; r < no && r < WIDE_ROWS; r++)
-    drawWideRow(g, ox, WIDE_ROW_Y0 + r * WIDE_ROW_H, a.buckets[first + r], stale);
+    drawWideRow(g, ox, oy + WIDE_ROW_Y0 + r * WIDE_ROW_H, a.buckets[first + r], stale);
 }
 
 // ---------------------------------------------------------------- square page
@@ -874,12 +911,20 @@ bool uiNextPage() {
 }
 
 // Paint one column-sized pane via the sprite, or straight to the panel.
-static void pushPane(int x, void (*draw)(TFT_eSPI &, int, const Account &), const Account &a) {
-  if (haveColSpr) { draw(colSpr, 0, a); colSpr.pushSprite(x, 0); }
-  else            draw(tft, x, a);
+static void pushPane(int x, void (*draw)(TFT_eSPI &, int, int, const Account &), const Account &a) {
+  if (!haveColSpr) { draw(tft, x, 0, a); return; }
+#if BIG_SCREEN
+  for (int half = 0; half < 2; half++) {                // the buffer is half height
+    draw(colSpr, 0, -half * (SCR_H / 2), a);
+    colSpr.pushSprite(x, half * (SCR_H / 2));
+  }
+#else
+  draw(colSpr, 0, 0, a);
+  colSpr.pushSprite(x, 0);
+#endif
 }
-static void columnWithRule(TFT_eSPI &g, int ox, const Account &a) { drawColumn(g, ox, a, true); }
-static void columnPlain(TFT_eSPI &g, int ox, const Account &a)    { drawColumn(g, ox, a, false); }
+static void columnWithRule(TFT_eSPI &g, int ox, int oy, const Account &a) { drawColumn(g, ox, oy, a, true); }
+static void columnPlain(TFT_eSPI &g, int ox, int oy, const Account &a)    { drawColumn(g, ox, oy, a, false); }
 
 // Dots for every account (the visible pair lit) and arrows at the edges
 // that have more beyond them.

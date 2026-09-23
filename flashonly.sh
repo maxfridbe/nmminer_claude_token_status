@@ -4,7 +4,7 @@
 # (WiFi on its touchscreen, Claude accounts from your phone).
 #
 #   ./flashonly.sh             pick the board and USB device, flash the latest release
-#   ./flashonly.sh --board nmtv  skip the board question (cyd, crow28 or nmtv)
+#   ./flashonly.sh --board nmtv  skip the board question (cyd, crow28, e32r40t or nmtv)
 #   ./flashonly.sh --local     flash the image from tools/make_release.sh
 #   ./flashonly.sh --erase     wipe the board first (its WiFi, accounts and logins)
 #   PORT=/dev/ttyUSB0 ./flashonly.sh --yes     no questions (not with --erase)
@@ -42,15 +42,17 @@ if [[ -z "$BOARD" ]]; then
     echo "Which board?"
     echo "  1) CYD     ESP32-2432S028 Cheap Yellow Display, 2.8in touchscreen"
     echo "  2) crow28  CrowPanel ESP32 Miner LCD 2.8in (SKU DHM04728D)"
-    echo "  3) NM-TV   NMMiner NM-TV, 1.54in square screen with a touch button"
+    echo "  3) e32r40t LCDWiki 4.0in ESP32-32E display (E32R40T), 480x320"
+    echo "  4) NM-TV   NMMiner NM-TV, 1.54in square screen with a touch button"
     case "$(ask "Board [1]: ")" in
-      2|crow28) BOARD=crow28 ;;
-      3|nmtv)   BOARD=nmtv ;;
-      *)        BOARD=cyd ;;
+      2|crow28)  BOARD=crow28 ;;
+      3|e32r40t) BOARD=e32r40t ;;
+      4|nmtv)    BOARD=nmtv ;;
+      *)         BOARD=cyd ;;
     esac
   fi
 fi
-[[ "$BOARD" == cyd || "$BOARD" == crow28 || "$BOARD" == nmtv ]] || die "--board must be cyd, crow28 or nmtv"
+[[ "$BOARD" =~ ^(cyd|crow28|e32r40t|nmtv)$ ]] || die "--board must be cyd, crow28, e32r40t or nmtv"
 URL="https://github.com/$REPO/releases/latest/download/claude-status-$BOARD.bin"
 IMG="$HERE/firmware/claude-status-$BOARD.bin"
 

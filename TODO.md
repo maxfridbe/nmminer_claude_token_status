@@ -32,6 +32,13 @@
 - [ ] Check taps land correctly with the built-in defaults, and after a
       calibration run.
 
+## LCDWiki 4.0" E32R40T
+
+- [x] Pins from the factory test firmware (disassembly), matching LCDWiki's table.
+- [x] Display, touch and calibration working on the board.
+- [ ] Check the scaled 480x320 layout on real data (two accounts, one account).
+- [ ] RGB LED (22/16/17), speaker (26) and battery voltage (34) are unused so far.
+
 ## NM-TV bring-up (untested on hardware)
 
 - [ ] **Find the button.** Flash `env:nmtv-probe`, touch the button, read the

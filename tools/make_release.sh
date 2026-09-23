@@ -21,7 +21,7 @@ fi
 rm -f include/secrets.h                     # generic images: never embed a config
 BOOT_APP0="$(find ~/.platformio/packages/framework-arduinoespressif32/tools/partitions -name boot_app0.bin | head -1)"
 ESPTOOL="$(find ~/.platformio/packages/tool-esptoolpy -name esptool.py | head -1)"
-BOARDS="${BOARDS:-cyd crow28 nmtv}"
+BOARDS="${BOARDS:-cyd crow28 e32r40t nmtv}"
 rm -rf firmware && mkdir -p firmware
 
 for board in $BOARDS; do
