@@ -74,10 +74,18 @@ void   uiShowMenu();
 void   uiCloseOverlay();
 int    uiOverlay();
 // Menu entries by what they do, since boards show different sets.
-enum MenuAction { MA_NONE = -1, MA_PHONE, MA_WIFI_SCREEN, MA_WIFI_PHONE, MA_UPDATE, MA_RESTART, MA_CLOSE };
+enum MenuAction { MA_NONE = -1, MA_PHONE, MA_WIFI_SCREEN, MA_WIFI_PHONE, MA_UPDATE, MA_CALIBRATE,
+                  MA_WIPE, MA_RESTART, MA_CLOSE };
 MenuAction uiMenuHit(int x, int y);   // touchscreens: entry at a point, or MA_NONE
 void       uiMenuNext();              // one-button boards: move the highlight
 MenuAction uiMenuSelected();          // one-button boards: the highlighted entry
+// Full-screen yes/no. Touchscreens tap a button; one-button boards tap to move
+// the highlight and hold to pick.
+bool       uiConfirm(const char *title, const char *line, const char *yes, const char *no);
+#if TOUCH_VIA_TFT
+// Corner-touch calibration; false if nobody touches within 15s when waiting.
+bool       uiTouchCalibrate(uint16_t out[5], uint32_t waitMs);
+#endif
 bool   uiSetupButtonHit(int x, int y); // "Use this screen" on the setup screen
 
 // wifi_screen.cpp (touchscreens): blocks for one tap; false on timeout

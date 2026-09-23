@@ -24,6 +24,14 @@
 - [ ] **Layouts on real data.** 1 account (full screen) and 3 accounts
       (page flip every 12 s, swipe).
 
+## CrowPanel 2.8" (SKU DHM04728D)
+
+- [x] Display: backlight GPIO 27, MISO GPIO 4 (not 12 as on the CYD).
+- [x] Touch: XPT2046 on the display bus, chip select 33, pressure threshold 90.
+- [x] Calibration at boot, saved in settings, redoable from the menu.
+- [ ] Check taps land correctly with the built-in defaults, and after a
+      calibration run.
+
 ## NM-TV bring-up (untested on hardware)
 
 - [ ] **Find the button.** Flash `env:nmtv-probe`, touch the button, read the

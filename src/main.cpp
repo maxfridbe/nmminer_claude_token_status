@@ -156,6 +156,23 @@ static void menuAction(MenuAction act) {
       screenFirmwareUpdate();
       uiCloseOverlay();
       break;
+#if TOUCH_VIA_TFT
+    case MA_CALIBRATE:
+      uiTouchCalibrate(cfg.touchCal, 0);
+      settingsSaveTouchCal();
+      uiCloseOverlay();
+      break;
+#endif
+    case MA_WIPE:         // factory reset: WiFi, accounts and logins
+      if (uiConfirm("Wipe all settings", "Erases WiFi, accounts and every login on this board.",
+                    "Wipe", "Cancel")) {
+        settingsFactoryReset();
+        uiSplash("Wiped. Restarting...");
+        delay(900);
+        ESP.restart();
+      }
+      uiCloseOverlay();
+      break;
     case MA_RESTART:
       uiSplash("Restarting...");
       delay(400);
@@ -256,7 +273,14 @@ static bool heldAtBoot() {
 static void maybeStartWeb() {
   if (WiFi.status() != WL_CONNECTED) return;
   bool changed = false;
-  if (accountCount == 0 && !webHotspotUp()) { webStartHotspot(); changed = true; }
+  // No account yet, or no way to ask for it on the board: offer the hotspot.
+  // webLoop() drops it after 15 idle minutes once an account exists.
+  static bool offered = false;
+  if ((accountCount == 0 || (!HAS_INPUT && !offered)) && !webHotspotUp()) {
+    webStartHotspot();
+    offered = true;
+    changed = true;
+  }
   if (cfg.hosting && !wifiLink.url[0]) {
     webStartLan();
     strlcpy(wifiLink.url, webUrl().c_str(), sizeof(wifiLink.url));
@@ -299,6 +323,16 @@ void setup() {
   settingsLoad();
   rampBacklight(onLevel(), 400);
 
+#if TOUCH_VIA_TFT
+  // This panel's touch needs calibrating once, before anything that needs
+  // tapping. A board that has never been set up waits a while for someone to
+  // start it; otherwise it moves on quickly. Either way it falls back to the
+  // board's defaults, so broken touch can't strand it here.
+  tft.setTouch(cfg.touchCal);
+  if (!cfg.touchCalOk && uiTouchCalibrate(cfg.touchCal, settingsHaveWifi() ? 15000 : 60000))
+    settingsSaveTouchCal();
+#endif
+
   bool asked = settingsTakeSetupFlag();       // "Change WiFi" from the menu
   bool held = !asked && heldAtBoot();
   if (!settingsHaveWifi() || held || asked) {
@@ -326,6 +360,8 @@ void setup() {
 static void setupModeTouch() {
   if (!HAS_TOUCHSCREEN) return;
   InputEvent e = inputPoll();
+  if (e.kind == IN_NONE) return;
+  Serial.printf("[input] setup screen %s at %d,%d\n", e.kind == IN_TAP ? "tap" : "event", e.x, e.y);
   if (e.kind != IN_TAP || !uiSetupButtonHit(e.x, e.y)) return;
   if (screenWifiSetup()) {
     uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());

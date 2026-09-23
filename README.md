@@ -1,8 +1,8 @@
 # claude-status
 
 A desk display for Claude usage limits on NMMiner-style ESP32 boards: the 2.8"
-"Cheap Yellow Display" touchscreen, or the 1.54" NM-TV with a single touch
-button. It shows the session window and per-model weekly limits for up to four
+"Cheap Yellow Display", the CrowPanel 2.8" miner LCD, or the 1.54" NM-TV with
+a single touch button. It shows the session window and per-model weekly limits for up to four
 Claude accounts, checking every 15 minutes.
 
 Set it up on the touchscreen and your phone (join its hotspot, sign in to
@@ -33,18 +33,37 @@ The layout follows the number of accounts:
 
 ## Boards
 
-| Board | Screen | Input | Status |
-|---|---|---|---|
-| ESP32-2432S028 "Cheap Yellow Display" (CYD) | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
-| NMMiner NM-TV 1.54" | 1.54" 240x240 ST7789 | one touch button on top | **untested**: built from NMTech's published pins, not yet run on the hardware |
+| Board | Build | Screen | Input | Status |
+|---|---|---|---|---|
+| ESP32-2432S028 "Cheap Yellow Display" | `cyd` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
+| CrowPanel ESP32 Miner LCD 2.8" (SKU DHM04728D) | `crow28` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
+| NMMiner NM-TV 1.54" | `nmtv` | 1.54" 240x240 ST7789 | one touch button on top | **untested**: built from NMTech's published pins, not yet run on the hardware |
 
-Both are classic ESP32 boards; everything but the screen and input is shared.
-Each gets its own firmware, `claude-status-cyd.bin` or `claude-status-nmtv.bin`,
-and updates itself with its own `-app.bin`.
+All are classic ESP32 boards; everything but the screen and input is shared.
+Each gets its own firmware, `claude-status-<build>.bin`, and updates itself
+with its own `-app.bin`. A board only ever downloads its own build.
 
 Some CYD units power up with inverted colors. This build sends `INVON` to correct
 them (`TFT_INVERSION_ON` in `platformio.ini`). If your screen shows black text
 on white, remove that flag.
+
+### CrowPanel 2.8" miner LCD
+
+Looks like a CYD and mostly is one, with three differences that matter:
+
+- **Backlight on GPIO 27** (the CYD uses 21). Wrong pin means a dark screen.
+- **MISO on GPIO 4** (the CYD uses 12). This is what makes its touch appear
+  missing: the touch chip answers on a pin the CYD build never reads.
+- **Touch shares the display's SPI bus** (chip select 33), and reports weak
+  pressure, about 130 against an idle 30, so the threshold is lowered to 90
+  from TFT_eSPI's default 350.
+
+**Touch calibration.** This panel needs calibrating once. A board that has
+never been set up offers it at boot and waits 60 seconds; after that it waits
+15. Touch the arrow in each corner and the result is saved, surviving restarts
+and updates. Skip it and the board's built-in defaults are used. To redo it:
+hold the screen, then **Calibrate touch**. If nobody touches the screen, it
+always moves on, so a board with broken touch still boots.
 
 ### NM-TV: the non-touchscreen option
 
@@ -122,6 +141,8 @@ Press and hold the screen for about 1.5 seconds:
 | WiFi on this screen | pick a network and type its password on the keyboard |
 | WiFi with a phone | restarts into the setup hotspot |
 | Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
+| Calibrate touch | touchscreens that need it (CrowPanel): touch each corner arrow |
+| Wipe all settings | erases WiFi, accounts and logins after a confirmation, then restarts into first-time setup |
 | Restart / Close | |
 
 Changing WiFi never touches accounts or logins. A new network is tested before
@@ -284,6 +305,7 @@ deploy, run `tools/scope_test.py <alias>`.
 | `deploy_and_build.sh` | build from source and flash, from a config file or generic |
 | `tools/make_release.sh` | builds each board's generic images into `firmware/` |
 | `src/board.h` | per-board screen, backlight and input settings |
+| `src/probe/` | bring-up firmware: the NM-TV's button, the CrowPanel's touch |
 | `src/input.cpp` | touchscreen or single button, as taps, holds and swipes |
 | `src/probe/probe.cpp` | NM-TV button finder (`env:nmtv-probe`) |
 | `.github/workflows/release.yml` | builds that image on GitHub and publishes it for each `v*` tag |

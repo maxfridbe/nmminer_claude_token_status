@@ -25,6 +25,8 @@ struct Settings {
   char       refreshScope[96];
   bool       hosting;       // serve the setup website on the LAN
   uint16_t   pageSeconds;
+  uint16_t   touchCal[5];   // TFT_eSPI touch calibration, saved after running it
+  bool       touchCalOk;
   uint16_t   refreshMinutes;   // how often to check usage
   uint8_t    brightness;       // backlight %, while the screen is on
   uint16_t   sleepMinutes;     // idle time before the screen dims out; 0 = never
@@ -38,6 +40,7 @@ extern Settings cfg;
 void settingsLoad();                 // NVS, seeded from secrets.h when it changed
 void settingsSave();                 // everything except tokens
 void settingsSaveTokens(int i);
+void settingsSaveTouchCal();
 bool settingsHaveWifi();
 int  settingsFindAccount(const char *alias);
 void settingsRemoveAccount(int i);

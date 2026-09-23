@@ -4,6 +4,31 @@
 #define RELEASE_READS 3      // idle samples before a press counts as over
 
 #if HAS_TOUCHSCREEN
+#if TOUCH_VIA_TFT
+// ------------------------------------------- touch on the display's own SPI bus
+// TFT_eSPI owns the bus and reads the touch controller itself (TOUCH_CS).
+
+#include <TFT_eSPI.h>
+extern TFT_eSPI tft;
+
+#define SWIPE_PX 40
+
+void inputBegin() {}
+
+bool touchRead(int &x, int &y) {
+  uint16_t tx, ty;
+  if (!tft.getTouch(&tx, &ty)) return false;
+  x = constrain((int)tx, 0, SCR_W - 1);
+  y = constrain((int)ty, 0, SCR_H - 1);
+  return true;
+}
+
+bool inputPressed() {
+  int x, y;
+  return touchRead(x, y);
+}
+
+#else
 // ---------------------------------------------------------------- CYD touchscreen
 
 #include <SPI.h>
@@ -44,6 +69,9 @@ bool touchRead(int &x, int &y) {
 
 bool inputPressed() { return digitalRead(XPT2046_IRQ) == LOW; }
 
+#endif  // TOUCH_VIA_TFT
+
+// ---- shared by both touchscreen backends: taps, swipes and holds
 static bool down = false, held = false;
 static int  sx, sy, lx, ly, idle;
 static uint32_t since;
@@ -82,7 +110,7 @@ void inputBegin() {
   for (int i = 0; i < 16; i++) { sum += touchRead(BUTTON_PIN); delay(5); }
   padBase = sum / 16;
 #else
-  pinMode(BUTTON_PIN, INPUT);
+  pinMode(BUTTON_PIN, BUTTON_ACTIVE == LOW ? INPUT_PULLUP : INPUT);
 #endif
 }
 

@@ -628,12 +628,16 @@ static void drawPinOverlay() {
 // highlight with each tap (hold picks it).
 struct MenuEntry { MenuAction act; const char *label; const char *sub; };
 static const MenuEntry MENU[] = {
-  {MA_PHONE,       "Phone setup page",    "Accounts and settings, via the board's hotspot"},
+  {MA_PHONE,       "Phone setup page",    ""},
 #if HAS_TOUCHSCREEN
-  {MA_WIFI_SCREEN, "WiFi on this screen", "Pick a network, type the password here"},
+  {MA_WIFI_SCREEN, "WiFi on this screen", ""},
 #endif
-  {MA_WIFI_PHONE,  "WiFi with a phone",   "Restart into the setup hotspot"},
-  {MA_UPDATE,      "Update firmware",     "Latest release, or pick a version"},
+  {MA_WIFI_PHONE,  "WiFi with a phone",   ""},
+  {MA_UPDATE,      "Update firmware",     ""},
+#if TOUCH_VIA_TFT
+  {MA_CALIBRATE,   "Calibrate touch",     ""},
+#endif
+  {MA_WIPE,        "Wipe all settings",   ""},
   {MA_RESTART,     "Restart",             ""},
   {MA_CLOSE,       "Close",               ""},
 };
@@ -641,15 +645,15 @@ static const MenuEntry MENU[] = {
 #if HAS_TOUCHSCREEN
 #define MENU_ROWS (MENU_ENTRIES - 1)           // Restart and Close share a row
 #define MENU_X    16
-#define MENU_Y0   38
-#define MENU_H    34
-#define MENU_GAP  5
+#define MENU_Y0   34
+#define MENU_H    30
+#define MENU_GAP  4
 #else
 #define MENU_ROWS MENU_ENTRIES
 #define MENU_X    12
-#define MENU_Y0   34
-#define MENU_H    30
-#define MENU_GAP  5
+#define MENU_Y0   30
+#define MENU_H    26
+#define MENU_GAP  3
 #endif
 #define MENU_W   (SCR_W - 2 * MENU_X)
 
@@ -738,6 +742,106 @@ static void drawEmptyScreen() {
   tft.setTextColor(C_DIM);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("No accounts yet. Joining WiFi...", SCR_W / 2, SCR_H / 2);
+}
+
+// With no buttons or touch, the way in is the hotspot, so say so on screen
+// while it's up.
+static void drawSetupFooter() {
+  const int h = 14, y = SCR_H - h;
+  char line[96];
+  snprintf(line, sizeof(line), "setup: join %s  pw %s  ->  %s", webApSsid(), webApPass(),
+           webHotspotUrl().c_str() + 7);
+  tft.fillRect(0, y, SCR_W, h, rgb(0x121218));
+  tft.setTextFont(1);
+  tft.setTextColor(C_SOFT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString(fit(tft, line, SCR_W - 12), 6, y + h / 2);
+}
+
+#if TOUCH_VIA_TFT
+// Touch the arrow in each corner. Returns false if nobody touches the screen
+// within the first 15 seconds, so a board with broken touch still boots.
+bool uiTouchCalibrate(uint16_t out[5], uint32_t waitMs) {
+  tft.fillScreen(C_BG);
+  drawMark(tft, (SCR_W - CLAUDE_MARK_18) / 2, 40, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Calibrate the touchscreen", SCR_W / 2, 90);
+  tft.setTextFont(2);
+  tft.setTextColor(C_DIM);
+  tft.drawString("Touch the arrow in each corner.", SCR_W / 2, 120);
+
+  if (waitMs) {
+    tft.drawString("Touch the screen to start.", SCR_W / 2, 145);
+    uint32_t start = millis();
+    while (!inputPressed()) {
+      if (millis() - start > waitMs) return false;    // nobody there; carry on
+      char t[32];
+      snprintf(t, sizeof(t), "skipping in %2d s ", (int)((waitMs - (millis() - start)) / 1000));
+      tft.setTextColor(C_FAINT, C_BG);
+      tft.drawString(t, SCR_W / 2, 175);
+      delay(100);
+    }
+    while (inputPressed()) delay(10);
+  }
+
+  tft.fillScreen(C_BG);
+  tft.calibrateTouch(out, C_TEXT, C_BG, 20);
+  tft.setTouch(out);
+  tft.fillScreen(C_BG);
+  tft.setTextFont(2);
+  tft.setTextColor(C_SOFT);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Calibrated", SCR_W / 2, SCR_H / 2);
+  delay(700);
+  return true;
+}
+#endif
+
+// Full-screen yes/no, used for anything destructive.
+bool uiConfirm(const char *title, const char *line, const char *yes, const char *no) {
+  const int by = SCR_H - 60, bh = 44, half = (SCR_W - 36) / 2;
+  const char *labels[2] = {yes, no};
+  int sel = 0;
+  auto paint = [&]() {
+    tft.fillScreen(C_BG);
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextColor(C_TEXT);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(title, 14, 24);
+    tft.setTextFont(2);
+    tft.setTextColor(C_SOFT);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(fit(tft, line, SCR_W - 28), 14, 60);
+    for (int i = 0; i < 2; i++) {
+      int x = 12 + i * (half + 12);
+      bool lit = HAS_TOUCHSCREEN ? i == 0 : i == sel;
+      tft.fillSmoothRoundRect(x, by, half, bh, 9, lit ? C_HOT : rgb(0x22222A), C_BG);
+      tft.setTextFont(2);
+      tft.setTextColor(lit ? C_BG : C_TEXT);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString(labels[i], x + half / 2, by + bh / 2);
+    }
+    if (!HAS_TOUCHSCREEN) {
+      tft.setTextFont(1);
+      tft.setTextColor(C_FAINT);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
+    }
+  };
+  paint();
+  for (;;) {
+    InputEvent e = inputWait();
+    if (!HAS_TOUCHSCREEN) {
+      if (e.kind == IN_HOLD) return sel == 0;
+      sel ^= 1;
+      paint();
+      continue;
+    }
+    if (e.kind != IN_TAP || e.y < by - 10 || e.y > by + bh + 10) continue;
+    return e.x < SCR_W / 2;
+  }
 }
 
 // ---------------------------------------------------------------- public
@@ -833,6 +937,7 @@ void uiDrawAll() {
   }
   if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(2 * COL_W, 0); }
   else             drawLinkStrip(tft, 2 * COL_W);
+  if (!HAS_INPUT && webHotspotUp() && accountCount) drawSetupFooter();
   if (overlay == OV_PIN) drawPinOverlay();
   uiDrawStatus();
 }

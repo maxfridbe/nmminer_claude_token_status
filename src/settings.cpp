@@ -30,6 +30,9 @@ static void loadNvs() {
   cfg.sleepMinutes   = prefs.getUShort("sleepmin", 0);
   cfg.dimMinutes     = prefs.getUShort("dimmin", 5);
   cfg.nAccounts   = constrain(prefs.getInt("n", 0), 0, MAX_ACCOUNTS);
+  static const uint16_t calDefault[5] = TOUCH_CAL_DEFAULT;
+  memcpy(cfg.touchCal, calDefault, sizeof(cfg.touchCal));
+  cfg.touchCalOk  = prefs.getBytes("tcal", cfg.touchCal, sizeof(cfg.touchCal)) == sizeof(cfg.touchCal);
 
   for (int i = 0; i < cfg.nAccounts; i++) {
     AccountCfg &a = cfg.acct[i];
@@ -43,6 +46,13 @@ static void loadNvs() {
     a.refresh   = prefs.getString(key("rt", i).c_str(), "");
     a.expiresMs = prefs.getULong64(key("ex", i).c_str(), 0);
   }
+}
+
+void settingsSaveTouchCal() {
+  prefs.putBytes("tcal", cfg.touchCal, sizeof(cfg.touchCal));
+  cfg.touchCalOk = true;
+  Serial.printf("[touch] calibration saved: %u %u %u %u %u\n", cfg.touchCal[0], cfg.touchCal[1],
+                cfg.touchCal[2], cfg.touchCal[3], cfg.touchCal[4]);
 }
 
 void settingsSaveTokens(int i) {

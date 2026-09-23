@@ -37,7 +37,7 @@ jobs:
       - name: Fetch toolchains and libraries
         run: |
           for attempt in 1 2 3; do
-            .toolchain/bin/pio pkg install -e cyd -e nmtv && exit 0
+            .toolchain/bin/pio pkg install -e cyd -e crow28 -e nmtv && exit 0
             echo "Fetch attempt $attempt failed; retrying"
             sleep $((attempt * 20))
           done
@@ -70,5 +70,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" firmware/*.bin firmware/*.sha256 \
             --title "claude-status $GITHUB_REF_NAME" \
-            --notes "Generic firmware per board: claude-status-cyd.bin (ESP32-2432S028 Cheap Yellow Display) and claude-status-nmtv.bin (NMMiner NM-TV 1.54in). New board: ./flashonly.sh. Board on v26.09.02 or later: hold the screen, Update firmware. The -app.bin files are the over-the-air images; claude-status.bin and claude-status-app.bin are the CYD build under its old names. See the README." \
+            --notes "Generic firmware per board: claude-status-cyd.bin (ESP32-2432S028 Cheap Yellow Display), claude-status-crow28.bin (CrowPanel ESP32 Miner LCD 2.8in) and claude-status-nmtv.bin (NMMiner NM-TV 1.54in). New board: ./flashonly.sh. Board on v26.09.02 or later: hold the screen, Update firmware. The -app.bin files are the over-the-air images; claude-status.bin and claude-status-app.bin are the CYD build under its old names. See the README." \
             --generate-notes

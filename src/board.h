@@ -21,7 +21,27 @@
   #ifndef BUTTON_TOUCHPAD
   #define BUTTON_TOUCHPAD   1        // 1: ESP32 touch pad (touchRead); 0: digital, e.g. a TTP223
   #endif
+  #ifndef BUTTON_ACTIVE
   #define BUTTON_ACTIVE     HIGH     // digital mode only
+  #endif
+
+#elif defined(BOARD_CROW28)
+// CrowPanel "ESP32 Miner LCD-2.8 inch" (SKU DHM04728D): classic ESP32,
+// 240x320 ILI9341 on the same SPI pins as the CYD, backlight on GPIO 27.
+// Resistive touch (XPT2046) shares the display's SPI bus with chip select 33.
+// Unlike the Cheap Yellow Display, this board wires MISO to GPIO 4, which is
+// why touch reads came back empty until that was corrected.
+  #define BOARD_ID          "crow28"
+  #define BOARD_NAME        "CrowPanel 2.8in"
+  #define SCR_W             320
+  #define SCR_H             240
+  #define TFT_ROTATION      1
+  #define HAS_TOUCHSCREEN   1
+  #define TOUCH_VIA_TFT     1        // shared SPI bus: tft.getTouch()
+  // Starting point until calibrated on the board itself (measured on one unit).
+  #define TOUCH_CAL_DEFAULT {181, 3522, 326, 3497, 1}
+  #define BL_ACTIVE_LOW     0
+  #define PANEL_POWER_PIN   -1
 
 #else
 // ESP32-2432S028 "Cheap Yellow Display": 320x240 ILI9341, resistive touch.
@@ -38,4 +58,18 @@
   #define PANEL_POWER_PIN   -1
 #endif
 
+#ifndef TOUCH_VIA_TFT
+#define TOUCH_VIA_TFT 0
+#endif
+#ifndef BUTTON_PIN
+#define BUTTON_PIN -1        // touchscreen boards have no separate button
+#endif
+#ifndef TOUCH_CAL_DEFAULT
+#define TOUCH_CAL_DEFAULT {0, 0, 0, 0, 0}
+#endif
+
 #define SQUARE_SCREEN (SCR_W == SCR_H)
+
+// Boards with neither a touchscreen nor a button are set up entirely from a
+// phone, so the hotspot has to offer itself rather than wait to be summoned.
+#define HAS_INPUT (HAS_TOUCHSCREEN || BUTTON_PIN >= 0)
