@@ -12,6 +12,7 @@
 #include "web.h"
 #include "update.h"
 #include "relay.h"
+#include "theme.h"
 #include <WiFi.h>
 #include <qrcode.h>
 
@@ -69,24 +70,33 @@ static uint16_t rgb(uint32_t hex) {
 
 static uint16_t C_BG, C_TEXT, C_SOFT, C_DIM, C_FAINT, C_TRACK, C_RULE;
 static uint16_t C_GOOD, C_WARN, C_HOT, C_INFO, C_MARK;
+static uint16_t C_BTN, C_BTN_Q, C_PANEL, C_BTN_ALT;    // button and panel fills
 
 static TFT_eSprite colSpr  = TFT_eSprite(&tft);
 static TFT_eSprite linkSpr = TFT_eSprite(&tft);
 static bool haveColSpr = false, haveLinkSpr = false;
 
+void uiApplyTheme() {
+  C_BG    = themed(0x000000, 0xF4F3EE);
+  C_TEXT  = themed(0xFFFFFF, 0x141414);
+  C_SOFT  = themed(0xD6D6D6, 0x3A3A3A);
+  C_DIM   = themed(0x8A8A8A, 0x6E6E6E);
+  C_FAINT = themed(0x4A4A4A, 0xA8A8A8);
+  C_TRACK = themed(0x262626, 0xDDDBD5);
+  C_RULE  = themed(0x1C1C1C, 0xE2E0DA);
+  C_GOOD  = themed(0x2EE59D, 0x10A06A);
+  C_WARN  = themed(0xFFB020, 0xD08200);
+  C_HOT   = themed(0xFF4B4B, 0xD92D2D);
+  C_INFO  = themed(0x4DA3FF, 0x1F72D4);
+  C_MARK  = themed(0xD97757, 0xD06A48);   // dark: hsl(14.8, 63.1%, 59.6%), the mark's own fill
+  C_BTN     = themed(0x1C1C23, 0xE3E1DA);
+  C_BTN_Q   = themed(0x101014, 0xEBE9E3);
+  C_PANEL   = themed(0x16161B, 0xE9E7E1);
+  C_BTN_ALT = themed(0x22222A, 0xDAD8D0);
+}
+
 void uiInit() {
-  C_BG    = rgb(0x000000);
-  C_TEXT  = rgb(0xFFFFFF);
-  C_SOFT  = rgb(0xD6D6D6);
-  C_DIM   = rgb(0x8A8A8A);
-  C_FAINT = rgb(0x4A4A4A);
-  C_TRACK = rgb(0x262626);
-  C_RULE  = rgb(0x1C1C1C);
-  C_GOOD  = rgb(0x2EE59D);
-  C_WARN  = rgb(0xFFB020);
-  C_HOT   = rgb(0xFF4B4B);
-  C_INFO  = rgb(0x4DA3FF);
-  C_MARK  = rgb(0xD97757);      // hsl(14.8, 63.1%, 59.6%), the mark's own fill
+  uiApplyTheme();                 // dark until settings load; main applies the saved theme
 
   // Allocated once, before WiFi and TLS claim heap.
   colSpr.setColorDepth(16);
@@ -715,7 +725,7 @@ int uiChoose(const char *title, const char *const *labels, const char *const *su
     tft.drawString(title, x + 2, y0 / 2);
     for (int i = 0; i < n; i++) {
       int y = y0 + i * (rowH + gap);
-      tft.fillSmoothRoundRect(x, y, w, rowH, 10, rgb(0x1C1C23), C_BG);
+      tft.fillSmoothRoundRect(x, y, w, rowH, 10, C_BTN, C_BG);
       if (!HAS_TOUCHSCREEN && i == sel) tft.drawRoundRect(x, y, w, rowH, 10, C_MARK);
       bool hasSub = subs && subs[i] && subs[i][0];
       if (BIG_SCREEN) tft.setFreeFont(&FreeSansBold9pt7b); else tft.setTextFont(2);
@@ -808,7 +818,7 @@ void uiShowHotspot(const char *ssid, const char *pass, const char *url) {
 static void drawPinOverlay() {
   const int area = SQUARE_SCREEN ? SCR_W : 2 * COL_W;
   const int w = min(240, SCR_W - 16), h = 120, x = (area - w) / 2, y = (SCR_H - h) / 2;
-  tft.fillSmoothRoundRect(x, y, w, h, 12, rgb(0x16161B), C_BG);
+  tft.fillSmoothRoundRect(x, y, w, h, 12, C_PANEL, C_BG);
   tft.drawRoundRect(x, y, w, h, 12, C_MARK);
   tft.setTextFont(2);
   tft.setTextColor(C_DIM);
@@ -839,14 +849,22 @@ static const MenuEntry MENU[] = {
   {MA_CALIBRATE,   "Calibrate touch",     ""},
 #endif
   {MA_WIPE,        "Wipe all settings",   ""},
+#if !HAS_TOUCHSCREEN
+  {MA_BRIGHT,      "Brightness",          ""},   // touchscreens get a - / + row instead
+  {MA_THEME,       "Light mode",          ""},
+#endif
   {MA_RESTART,     "Restart",             ""},
   {MA_CLOSE,       "Close",               ""},
 };
 #define MENU_ENTRIES ((int)(sizeof(MENU) / sizeof(MENU[0])))
 #if HAS_TOUCHSCREEN
-// Two buttons a row; Restart and Close share the last one.
+// Two buttons a row, then brightness - / +, then Restart and Close.
 #define MENU_ITEMS (MENU_ENTRIES - 2)
-#define MENU_ROWS ((MENU_ITEMS + 1) / 2 + 1)
+#define MENU_ROWS ((MENU_ITEMS + 1) / 2 + 2)
+#define BRIGHT_ROW (MENU_ROWS - 2)
+#define BRIGHT_BW  (MENU_H * 3 / 2)        // width of the - and + buttons
+#define THEME_BW   (BIG_SCREEN ? 96 : 64)  // the Light / Dark toggle at the row's end
+#define BRIGHT_W   (MENU_W - THEME_BW - 6) // - Brightness +
 #define MENU_X    12
 #if BIG_SCREEN
 #define MENU_Y0   44
@@ -860,9 +878,9 @@ static const MenuEntry MENU[] = {
 #else
 #define MENU_ROWS MENU_ENTRIES
 #define MENU_X    12
-#define MENU_Y0   30
-#define MENU_H    26
-#define MENU_GAP  3
+#define MENU_Y0   28
+#define MENU_H    23
+#define MENU_GAP  2
 #endif
 #define MENU_W   (SCR_W - 2 * MENU_X)
 
@@ -874,6 +892,12 @@ MenuAction uiMenuHit(int x, int y) {
 #if HAS_TOUCHSCREEN
     bool right = x >= MENU_X + MENU_W / 2;
     if (i == MENU_ROWS - 1) return right ? MA_CLOSE : MA_RESTART;
+    if (i == BRIGHT_ROW) {
+      if (x < MENU_X + BRIGHT_BW + 8) return MA_BRIGHT_DOWN;
+      if (x >= MENU_X + BRIGHT_W + 3) return MA_THEME;
+      if (x > MENU_X + BRIGHT_W - BRIGHT_BW - 8) return MA_BRIGHT_UP;
+      return MA_NONE;
+    }
     int k = i * 2 + right;
     return k < MENU_ITEMS ? MENU[k].act : MA_NONE;
 #else
@@ -884,6 +908,42 @@ MenuAction uiMenuHit(int x, int y) {
 }
 
 void uiMenuNext() { menuSel = (menuSel + 1) % MENU_ENTRIES; uiDrawAll(); }
+
+#if HAS_TOUCHSCREEN
+// [ - ]  Brightness 60%  [ + ] [Light], with a thin level bar under the label.
+static void drawBrightRow() {
+  const int y = MENU_Y0 + BRIGHT_ROW * (MENU_H + MENU_GAP);
+  const int mx = MENU_X + BRIGHT_BW + 6, mw = BRIGHT_W - 2 * (BRIGHT_BW + 6);
+  tft.fillRect(MENU_X, y, MENU_W, MENU_H, C_BG);
+  const int tx = MENU_X + BRIGHT_W + 6;
+  tft.fillSmoothRoundRect(tx, y, THEME_BW, MENU_H, 10, C_BTN, C_BG);
+  if (BIG_SCREEN) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(cfg.lightMode ? "Dark" : "Light", tx + THEME_BW / 2, y + MENU_H / 2);
+  for (int k = 0; k < 2; k++) {
+    int bx = k ? MENU_X + BRIGHT_W - BRIGHT_BW : MENU_X;
+    tft.fillSmoothRoundRect(bx, y, BRIGHT_BW, MENU_H, 10, C_BTN, C_BG);
+    tft.setTextFont(4);
+    tft.setTextColor(C_TEXT);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(k ? "+" : "-", bx + BRIGHT_BW / 2, y + MENU_H / 2);
+  }
+  char label[24];
+  snprintf(label, sizeof(label), "Brightness %d%%", cfg.brightness);
+  if (BIG_SCREEN) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
+  if (tft.textWidth(label) > mw - 4) snprintf(label, sizeof(label), "%d%%", cfg.brightness);
+  tft.setTextColor(C_TEXT);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(label, mx + mw / 2, y + MENU_H / 2 - 4);
+  const int by = y + MENU_H - 7, bw = mw - 24;
+  tft.fillSmoothRoundRect(mx + 12, by, bw, 3, 1, C_TRACK, C_BG);
+  tft.fillSmoothRoundRect(mx + 12, by, max(3, bw * cfg.brightness / 100), 3, 1, C_MARK, C_BG);
+}
+void uiMenuBrightnessChanged() { if (overlay == OV_MENU) drawBrightRow(); }
+#else
+void uiMenuBrightnessChanged() { if (overlay == OV_MENU) uiDrawAll(); }
+#endif
 MenuAction uiMenuSelected() { return MENU[menuSel].act; }
 
 static void drawMenu() {
@@ -912,25 +972,30 @@ static void drawMenu() {
     int col = k < MENU_ITEMS ? k % 2 : k - MENU_ITEMS;
     int bx = MENU_X + col * (half + 6), y = MENU_Y0 + row * (MENU_H + MENU_GAP);
     bool quiet = k >= MENU_ITEMS;                  // Restart, Close
-    tft.fillSmoothRoundRect(bx, y, half, MENU_H, 10, rgb(quiet ? 0x101014 : 0x1C1C23), C_BG);
+    tft.fillSmoothRoundRect(bx, y, half, MENU_H, 10, quiet ? C_BTN_Q : C_BTN, C_BG);
     if (k == 0) tft.drawRoundRect(bx, y, half, MENU_H, 10, C_MARK);
     if (BIG_SCREEN) tft.setFreeFont(&FreeSans9pt7b); else tft.setTextFont(2);
     tft.setTextColor(quiet ? C_SOFT : C_TEXT);
     tft.setTextDatum(MC_DATUM);
     tft.drawString(MENU[k].label, bx + half / 2, y + MENU_H / 2);
   }
+  drawBrightRow();
   return;
 #endif
   for (int i = 0; i < MENU_ROWS; i++) {
     int y = MENU_Y0 + i * (MENU_H + MENU_GAP);
     bool lit = HAS_TOUCHSCREEN ? i == 0 : i == menuSel;
-    tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
+    tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_PANEL, C_BG);
     if (lit) tft.drawRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_MARK);
     bool sub = !SQUARE_SCREEN && MENU[i].sub[0];
     tft.setTextFont(2);
     tft.setTextColor(C_TEXT);
     tft.setTextDatum(ML_DATUM);
-    tft.drawString(MENU[i].label, MENU_X + 14, y + (sub ? 11 : MENU_H / 2));
+    char label[32];
+    if (MENU[i].act == MA_BRIGHT) snprintf(label, sizeof(label), "Brightness %d%%", cfg.brightness);
+    else if (MENU[i].act == MA_THEME) strlcpy(label, cfg.lightMode ? "Dark mode" : "Light mode", sizeof(label));
+    else strlcpy(label, MENU[i].label, sizeof(label));
+    tft.drawString(label, MENU_X + 14, y + (sub ? 11 : MENU_H / 2));
     if (sub) {
       tft.setTextFont(1);
       tft.setTextColor(C_DIM);
@@ -975,7 +1040,7 @@ static void drawSetupFooter() {
   char line[96];
   snprintf(line, sizeof(line), "setup: join %s  pw %s  ->  %s", webApSsid(), webApPass(),
            webHotspotUrl().c_str() + 7);
-  tft.fillRect(0, y, SCR_W, h, rgb(0x121218));
+  tft.fillRect(0, y, SCR_W, h, C_PANEL);
   tft.setTextFont(1);
   tft.setTextColor(C_SOFT);
   tft.setTextDatum(ML_DATUM);
@@ -1041,7 +1106,7 @@ bool uiConfirm(const char *title, const char *line, const char *yes, const char 
     for (int i = 0; i < 2; i++) {
       int x = 12 + i * (half + 12);
       bool lit = HAS_TOUCHSCREEN ? i == 0 : i == sel;
-      tft.fillSmoothRoundRect(x, by, half, bh, 9, lit ? C_HOT : rgb(0x22222A), C_BG);
+      tft.fillSmoothRoundRect(x, by, half, bh, 9, lit ? C_HOT : C_BTN_ALT, C_BG);
       tft.setTextFont(2);
       tft.setTextColor(lit ? C_BG : C_TEXT);
       tft.setTextDatum(MC_DATUM);

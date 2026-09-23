@@ -24,6 +24,7 @@ struct Settings {
   char       tz[64];
   char       refreshScope[96];
   bool       hosting;       // serve the setup website on the LAN
+  bool       lightMode;     // dark text on a light background (theme.h)
   char       relay[128];    // remote-setup MQTT server: "" = automatic (see relay.h)
   uint16_t   pageSeconds;
   uint16_t   touchCal[5];   // TFT_eSPI touch calibration, saved after running it

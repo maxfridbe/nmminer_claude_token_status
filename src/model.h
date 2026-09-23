@@ -60,6 +60,7 @@ bool   apiSigninPending(String &alias, String &url);
 
 // ui.cpp
 void   uiInit();
+void   uiApplyTheme();   // after cfg.lightMode changes
 void   uiSplash(const char* status);
 void   uiDrawAll();
 void   uiDrawStatus();
@@ -80,10 +81,14 @@ void   uiCloseOverlay();
 int    uiOverlay();
 // Menu entries by what they do, since boards show different sets.
 enum MenuAction { MA_NONE = -1, MA_PHONE, MA_WIFI_SCREEN, MA_WIFI_PHONE, MA_UPDATE, MA_CALIBRATE,
-                  MA_WIPE, MA_RESTART, MA_CLOSE };
+                  MA_WIPE, MA_RESTART, MA_CLOSE,
+                  MA_BRIGHT_DOWN, MA_BRIGHT_UP,   // touchscreens: the - and + buttons
+                  MA_BRIGHT,                      // one-button boards: step through levels
+                  MA_THEME };                     // light / dark
 MenuAction uiMenuHit(int x, int y);   // touchscreens: entry at a point, or MA_NONE
 void       uiMenuNext();              // one-button boards: move the highlight
 MenuAction uiMenuSelected();          // one-button boards: the highlighted entry
+void       uiMenuBrightnessChanged(); // redraw the brightness control after a change
 // Full-screen yes/no. Touchscreens tap a button; one-button boards tap to move
 // the highlight and hold to pick.
 bool       uiConfirm(const char *title, const char *line, const char *yes, const char *no);

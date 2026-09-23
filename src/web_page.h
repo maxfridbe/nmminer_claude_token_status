@@ -221,18 +221,20 @@ function deviceCard() {
   const sleep = num(S.sleepMinutes, 0, 1440), dim = num(S.dimMinutes, 0, 120);
   const secs = num(S.pageSeconds, 0, 3600);
   const hosting = el('input', {type: 'checkbox'}); hosting.checked = S.hosting;
+  const light = el('input', {type: 'checkbox'}); light.checked = S.lightMode;
   const relay = el('input', {value: S.relayCfg || '', placeholder: 'automatic', autocapitalize: 'off', autocorrect: 'off'});
   const save = el('button', {text: 'Save', onclick: async () => {
     try {
       await api('/api/settings', {refreshMinutes: +refresh.value, brightness: +bright.value,
         sleepMinutes: +sleep.value, dimMinutes: +dim.value, pageSeconds: +secs.value, hosting: hosting.checked,
-        relay: relay.value.trim()});
+        lightMode: light.checked, relay: relay.value.trim()});
       note(c, 'Saved.'); load();
     } catch (e) { note(c, e.message, true); }
   }});
   const wifi = el('button', {class: 'alt', text: 'Change WiFi', onclick: () => { c.after(wifiCard(false)); wifi.remove(); }});
   c.append(el('label', {text: 'Check usage every (minutes)'}), refresh,
     el('label', {text: 'Brightness (%)'}), bright,
+    el('label', {class: 'check'}, light, 'Light mode: dark text on a light screen'),
     el('label', {text: 'Dim out after this many idle minutes (0 = never)'}), sleep,
     el('label', {text: 'Fade length before the screen turns off (minutes)'}), dim,
     el('label', {text: 'Seconds per page, with 3+ accounts (0 = only by touch)'}), secs,

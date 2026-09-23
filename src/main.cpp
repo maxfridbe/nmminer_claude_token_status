@@ -161,6 +161,15 @@ static void phoneSetup() {
   }
 }
 
+// Brightness from the menu: applied at once, saved once the taps stop.
+static uint32_t brightSaveAt;
+static void setBrightness(int pct) {
+  cfg.brightness = constrain(pct, 5, 100);
+  setBacklight(onLevel());
+  brightSaveAt = millis() + 3000;
+  uiMenuBrightnessChanged();
+}
+
 static void menuAction(MenuAction act) {
   Serial.printf("[menu] %d\n", (int)act);
   switch (act) {
@@ -203,7 +212,27 @@ static void menuAction(MenuAction act) {
       }
       uiCloseOverlay();
       break;
+    case MA_BRIGHT_DOWN:
+      setBrightness(cfg.brightness > 10 ? cfg.brightness - 10 : 5);
+      return;
+    case MA_BRIGHT_UP:
+      setBrightness(cfg.brightness < 10 ? 10 : cfg.brightness + 10);
+      return;
+    case MA_THEME:
+      cfg.lightMode = !cfg.lightMode;
+      uiApplyTheme();
+      brightSaveAt = millis() + 3000;
+      uiDrawAll();                            // the menu, repainted in the new colors
+      return;
+    case MA_BRIGHT: {     // one button: the next step up, wrapping to the dimmest
+      static const uint8_t STEPS[] = {10, 25, 50, 75, 100};
+      int next = STEPS[0];
+      for (uint8_t s : STEPS) if (s > cfg.brightness) { next = s; break; }
+      setBrightness(next);
+      return;
+    }
     case MA_RESTART:
+      if (brightSaveAt) settingsSave();
       uiSplash("Restarting...");
       delay(400);
       ESP.restart();
@@ -354,6 +383,8 @@ void setup() {
 #else
   uiSplash("Starting...");
   settingsLoad();
+  uiApplyTheme();
+  if (cfg.lightMode) uiSplash("Starting...");
   rampBacklight(onLevel(), 400);
 
 #if TOUCH_VIA_TFT
@@ -409,6 +440,7 @@ void loop() {
   if (setupMode) { setupModeTouch(); delay(2); return; }
 
   uint32_t now = millis();
+  if (brightSaveAt && (int32_t)(now - brightSaveAt) >= 0) { brightSaveAt = 0; settingsSave(); }
   relayLoop();
   static String shown;                       // redraw the QR screens when the link changes
   String now_ = relayLink();

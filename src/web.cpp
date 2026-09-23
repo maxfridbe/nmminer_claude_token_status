@@ -110,6 +110,7 @@ static int handleState(const Ctx &c, JsonDocument &, JsonDocument &d) {
   d["pageSeconds"]    = cfg.pageSeconds;
   d["refreshMinutes"] = cfg.refreshMinutes;
   d["brightness"]     = cfg.brightness;
+  d["lightMode"]      = cfg.lightMode;
   d["sleepMinutes"]   = cfg.sleepMinutes;
   d["dimMinutes"]     = cfg.dimMinutes;
   d["maxAccounts"] = MAX_ACCOUNTS;
@@ -246,6 +247,11 @@ static int handleSettings(const Ctx &, JsonDocument &in, JsonDocument &out) {
   if (in["sleepMinutes"].is<int>())   cfg.sleepMinutes   = constrain(in["sleepMinutes"].as<int>(), 0, 1440);
   if (in["dimMinutes"].is<int>())     cfg.dimMinutes     = constrain(in["dimMinutes"].as<int>(), 0, 120);
   if (in["hosting"].is<bool>())    cfg.hosting = in["hosting"];
+  if (in["lightMode"].is<bool>() && in["lightMode"].as<bool>() != cfg.lightMode) {
+    cfg.lightMode = in["lightMode"];
+    uiApplyTheme();
+    uiDrawAll();
+  }
   settingsSave();
   return okReply(out);
 }

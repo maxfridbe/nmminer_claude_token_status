@@ -5,6 +5,7 @@
 #if HAS_TOUCHSCREEN
 #include "model.h"
 #include "settings.h"
+#include "theme.h"
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 
@@ -16,7 +17,6 @@ extern TFT_eSPI tft;
 #define BIG   (SCR_H >= 320)
 #define HEAD_H (BIG ? 34 : 26)
 
-static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cKeyHi, cText, cDim, cAccent, cBad;
 
 // ---------------------------------------------------------------- touch
@@ -310,8 +310,9 @@ static bool message(const char *title, const char *line, const char *ok, const c
 }
 
 bool screenWifiSetup() {
-  cBg = rgb(0x000000); cKey = rgb(0x1C1C22); cKeyHi = rgb(0x2A2A33);
-  cText = rgb(0xF4F4F7); cDim = rgb(0x8A8A96); cAccent = rgb(0xD97757); cBad = rgb(0xFF4B4B);
+  cBg = themed(0x000000, 0xF4F3EE); cKey = themed(0x1C1C22, 0xE3E1DA); cKeyHi = themed(0x2A2A33, 0xD4D2CA);
+  cText = themed(0xF4F4F7, 0x141414); cDim = themed(0x8A8A96, 0x6E6E78);
+  cAccent = themed(0xD97757, 0xD06A48); cBad = themed(0xFF4B4B, 0xD92D2D);
 
   String oldSsid = cfg.ssid, oldPass = cfg.pass;
   static Net nets[20];

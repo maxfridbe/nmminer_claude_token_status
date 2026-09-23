@@ -3,6 +3,7 @@
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "theme.h"
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <ArduinoJson.h>
@@ -31,7 +32,6 @@ const char *fwVersion() { return FW_VERSION[0] ? FW_VERSION : "dev"; }
 static const char *repo() { return UPDATE_REPO[0] ? UPDATE_REPO : DEFAULT_REPO; }
 const char *updateRepo() { return repo(); }
 
-static uint16_t rgb(uint32_t h) { return tft.color565(h >> 16, (h >> 8) & 0xFF, h & 0xFF); }
 static uint16_t cBg, cKey, cText, cDim, cAccent, cBad, cTrack;
 
 static void screen(const char *title, const char *line1, const char *line2 = nullptr, uint16_t c2 = 0,
@@ -312,8 +312,9 @@ static void versionsScreen(const String &installed, const String &latest) {
 }
 
 void screenFirmwareUpdate() {
-  cBg = rgb(0x000000); cKey = rgb(0x22222A); cText = rgb(0xF4F4F7); cDim = rgb(0x8A8A96);
-  cAccent = rgb(0xD97757); cBad = rgb(0xFF4B4B); cTrack = rgb(0x262626);
+  cBg = themed(0x000000, 0xF4F3EE); cKey = themed(0x22222A, 0xDAD8D0);
+  cText = themed(0xF4F4F7, 0x141414); cDim = themed(0x8A8A96, 0x6E6E78);
+  cAccent = themed(0xD97757, 0xD06A48); cBad = themed(0xFF4B4B, 0xD92D2D); cTrack = themed(0x262626, 0xDDDBD5);
   String installed = fwVersion();
   Serial.printf("[update] installed %s, repo %s\n", installed.c_str(), repo());
 

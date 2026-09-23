@@ -212,6 +212,7 @@ Press and hold the screen for about 1.5 seconds:
 | Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
 | Calibrate touch | touchscreens that need it (CrowPanel, E32R40T): touch each corner arrow |
 | Wipe all settings | erases WiFi, accounts and logins after a confirmation, then restarts into first-time setup |
+| Brightness − / + , Light / Dark | brightness in 10% steps and the light or dark theme, applied at once and saved a few seconds later. The NM-TV lists them as entries: holding on Brightness steps through 10, 25, 50, 75 and 100% |
 | Restart / Close | |
 
 Changing WiFi never touches accounts or logins. A new network is tested before
