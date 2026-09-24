@@ -16,3 +16,6 @@ verified-email
 firmware/
 .flashtool/
 site/
+
+# Release images cached by tools/convert.sh
+.cache/
