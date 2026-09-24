@@ -38,7 +38,7 @@ The layout follows the number of accounts:
 | ESP32-2432S028 "Cheap Yellow Display" | `cyd` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
 | CrowPanel ESP32 Miner LCD 2.8" (SKU DHM04728D) | `crow28` | 2.8" 320x240 ILI9341 | resistive touchscreen | tested |
 | LCDWiki 4.0" ESP32-32E display (E32R40T) | `e32r40t` | 4.0" 480x320 ST7796 | resistive touchscreen | tested |
-| NMMiner NM-TV 1.54" | `nmtv` | 1.54" 240x240 ST7789 | one touch button on top | **untested**: built from NMTech's published pins, not yet run on the hardware |
+| NMMiner NM-TV 1.54" | `nmtv` | 1.54" 240x240 ST7789 | one touch button on top | tested |
 
 All are classic ESP32 boards; everything but the screen and input is shared.
 Each gets its own firmware, `claude-status-<build>.bin`, and updates itself
@@ -104,12 +104,16 @@ The NM-TV is NMMiner's 1.54" "small TV": the same ESP32 as the CYD, a square
 240x240 screen, and a single touch button on top instead of a touchscreen.
 Everything the CYD does works on it, driven by that one button:
 
-| Where | Tap | Hold (1.5 s) |
-|---|---|---|
-| Dashboard | next account | open the menu |
-| Menu | move the highlight | pick the highlighted item |
-| Update screen, Versions list | move the highlight | pick it |
-| Setup / hotspot screens | close | |
+| Where | Tap | Double tap | Hold (1.5 s) |
+|---|---|---|---|
+| Dashboard | next account | open the menu | open the menu |
+| Menu | move the highlight | close the menu | activate the highlighted item |
+| Update screen, Versions list | move the highlight | | activate it |
+| Setup / hotspot screens | close | | |
+
+While you hold, the highlighted row fills from the left and fires when it's
+full, so there's no guessing how long to press. Elsewhere a thin bar along the
+bottom of the screen shows the same thing. Let go early and nothing happens.
 
 - The square screen shows one account per page: name and plan, the session
   ring, the week bar, and up to two model meters. With several accounts, pages
@@ -120,12 +124,12 @@ Everything the CYD does works on it, driven by that one button:
 - Flash it with `./flashonly.sh --board nmtv`. Updates over the air fetch
   `claude-status-nmtv-app.bin`.
 
-**Not yet tested on the hardware.** It's built from NMTech's published pins
-(display on GPIO 13/14/15/2, backlight GPIO 19 lit by a low level, panel power
-GPIO 21). The button's pin isn't published: flash `pio run -e nmtv-probe -t
-upload`, watch the serial monitor while touching it, and set `BUTTON_PIN` (and
-`BUTTON_TOUCHPAD`) in `src/board.h` from what it reports. See `TODO.md` for the
-rest of the bring-up list.
+**Pins, confirmed on the hardware.** Display on GPIO 13/14/15/2 as NMTech
+documents, but two things their guide gets wrong or omits: the panel's power
+enable (GPIO 21) and its backlight (GPIO 19) are both active **low**, and the
+button is a capacitive touch pad on **GPIO 32**, which isn't published at all.
+GPIO 19 also feeds the status LEDs, which is what made the backlight hunt
+confusing. `env:nmtv-probe` is the firmware that found them.
 
 ## Get started
 

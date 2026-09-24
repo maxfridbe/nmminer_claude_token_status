@@ -2,6 +2,12 @@
 
 #define LONG_PRESS_MS 1500   // hold this long for the menu
 #define RELEASE_READS 3      // idle samples before a press counts as over
+#define DOUBLE_GAP_MS 350    // a second tap within this window is a double tap
+
+static void (*holdIndicator)(float) = nullptr;
+void inputSetHoldIndicator(void (*fn)(float)) { holdIndicator = fn; }
+
+static void showHold(float f) { if (holdIndicator) holdIndicator(f); }
 
 #if HAS_TOUCHSCREEN
 #if TOUCH_VIA_TFT
@@ -81,14 +87,18 @@ InputEvent inputPoll() {
   if (touchRead(x, y)) {
     if (!down) { down = true; held = false; sx = x; sy = y; since = millis(); }
     lx = x; ly = y; idle = 0;
-    if (!held && millis() - since >= LONG_PRESS_MS && abs(lx - sx) < 30 && abs(ly - sy) < 30) {
+    bool still = abs(lx - sx) < 30 && abs(ly - sy) < 30;
+    if (!held && millis() - since >= LONG_PRESS_MS && still) {
       held = true;
+      showHold(0);
       return {IN_HOLD, sx, sy};
     }
+    if (!held) showHold(still ? (millis() - since) / (float)LONG_PRESS_MS : 0);
     return {IN_NONE, 0, 0};
   }
   if (!down || ++idle < RELEASE_READS) return {IN_NONE, 0, 0};
   down = false;
+  showHold(0);
   if (held) return {IN_NONE, 0, 0};
   int dx = lx - sx;
   if (dx <= -SWIPE_PX) return {IN_SWIPE_LEFT, sx, sy};
@@ -129,16 +139,44 @@ static bool down = false, held = false;
 static int  idle;
 static uint32_t since;
 
+// One button, three gestures. A finished tap is held back for DOUBLE_GAP_MS
+// to see whether a second one follows, so single taps arrive a moment late
+// but double taps are unambiguous.
+static bool     tapPending = false;
+static uint32_t tapAt = 0;
+
 InputEvent inputPoll() {
   if (inputPressed()) {
-    if (!down) { down = true; held = false; since = millis(); }
+    if (!down) {
+      down = true;
+      held = false;
+      since = millis();
+      if (tapPending && millis() - tapAt <= DOUBLE_GAP_MS) {
+        tapPending = false;
+        held = true;                       // this press is spoken for
+        return {IN_DOUBLE, 0, 0};
+      }
+    }
     idle = 0;
-    if (!held && millis() - since >= LONG_PRESS_MS) { held = true; return {IN_HOLD, 0, 0}; }
+    if (!held && millis() - since >= LONG_PRESS_MS) {
+      held = true;
+      showHold(0);
+      return {IN_HOLD, 0, 0};
+    }
+    if (!held) showHold((millis() - since) / (float)LONG_PRESS_MS);
     return {IN_NONE, 0, 0};
   }
-  if (!down || ++idle < RELEASE_READS) return {IN_NONE, 0, 0};
-  down = false;
-  return {held ? IN_NONE : IN_TAP, 0, 0};
+
+  if (down && ++idle >= RELEASE_READS) {
+    down = false;
+    showHold(0);
+    if (!held) { tapPending = true; tapAt = millis(); }   // hold it back briefly
+  }
+  if (tapPending && millis() - tapAt > DOUBLE_GAP_MS) {
+    tapPending = false;
+    return {IN_TAP, 0, 0};
+  }
+  return {IN_NONE, 0, 0};
 }
 #endif
 
@@ -146,7 +184,7 @@ InputEvent inputWait(uint32_t timeoutMs) {
   uint32_t start = millis();
   for (;;) {
     InputEvent e = inputPoll();
-    if (e.kind == IN_TAP || e.kind == IN_HOLD) return e;
+    if (e.kind == IN_TAP || e.kind == IN_DOUBLE || e.kind == IN_HOLD) return e;
     if (timeoutMs && millis() - start > timeoutMs) return {IN_NONE, 0, 0};
     delay(10);
   }

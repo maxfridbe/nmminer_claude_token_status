@@ -5,21 +5,24 @@
 
 #if defined(BOARD_NMTV)
 // NMMiner NM-TV 1.54": ESP32, 240x240 ST7789, one touch button on top.
-// Pins per NMTech's custom-firmware guide; the button pin isn't published,
-// so it comes from the nmtv-probe build once there's hardware to probe.
+// Confirmed on hardware: the panel's power enable (GPIO 21) and its backlight
+// (GPIO 19) are both active LOW, and the button is a capacitive touch pad on
+// GPIO 32. NMTech's guide gives the display pins but not the button, and
+// says nothing about the power enable's polarity.
   #define BOARD_ID          "nmtv"
   #define BOARD_NAME        "NM-TV 1.54in"
   #define SCR_W             240
   #define SCR_H             240
   #define TFT_ROTATION      0
   #define HAS_TOUCHSCREEN   0
-  #define BL_ACTIVE_LOW     1        // TFT_BACKLIGHT_ON LOW in NMTech's setup
-  #define PANEL_POWER_PIN   21       // display power switch; driven high (to confirm)
+  #define BL_ACTIVE_LOW     1
+  #define PANEL_POWER_PIN   21       // display power enable
+  #define PANEL_POWER_LEVEL LOW
   #ifndef BUTTON_PIN
-  #define BUTTON_PIN        -1       // unknown until probed
+  #define BUTTON_PIN        32       // capacitive touch pad under the top button
   #endif
   #ifndef BUTTON_TOUCHPAD
-  #define BUTTON_TOUCHPAD   1        // 1: ESP32 touch pad (touchRead); 0: digital, e.g. a TTP223
+  #define BUTTON_TOUCHPAD   1        // ESP32 touch pad (touchRead), not a digital output
   #endif
   #ifndef BUTTON_ACTIVE
   #define BUTTON_ACTIVE     HIGH     // digital mode only
@@ -80,6 +83,9 @@
 #endif
 #ifndef BUTTON_PIN
 #define BUTTON_PIN -1        // touchscreen boards have no separate button
+#endif
+#ifndef PANEL_POWER_LEVEL
+#define PANEL_POWER_LEVEL HIGH
 #endif
 #ifndef TOUCH_CAL_DEFAULT
 #define TOUCH_CAL_DEFAULT {0, 0, 0, 0, 0}

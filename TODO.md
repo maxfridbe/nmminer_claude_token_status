@@ -45,15 +45,16 @@
 - [ ] Check the scaled 480x320 layout on real data (two accounts, one account).
 - [ ] RGB LED (22/16/17), speaker (26) and battery voltage (34) are unused so far.
 
-## NM-TV bring-up (untested on hardware)
+## NM-TV (NMMiner 1.54")
 
-- [ ] **Find the button.** Flash `env:nmtv-probe`, touch the button, read the
-      serial log. Set `BUTTON_PIN` and `BUTTON_TOUCHPAD` in `src/board.h`.
-- [ ] **Display.** Confirm the power pin (GPIO 21) should be driven high, and
-      that inversion (`TFT_INVERSION_ON`), color order and rotation look right.
-- [ ] **Flash size.** Over-the-air updates assume 4 MB (`min_spiffs.csv`).
-- [ ] **Square layout** on real data: header, ring, week bar, two meters.
-- [ ] **Button menu:** hold, tap to move, hold to pick; update screen likewise.
+- [x] Button found: capacitive touch pad on GPIO 32.
+- [x] Display: power enable GPIO 21 and backlight GPIO 19 are both active low
+      (NMTech's guide says the backlight is 19 "active low" but that pin also
+      drives the LEDs; the power enable's polarity is undocumented).
+- [x] One-button menu: tap moves, double tap opens/closes, hold activates,
+      with a fill showing how far the hold has got.
+- [ ] Run the dashboard with real accounts on it.
+
 
 ## Watch
 

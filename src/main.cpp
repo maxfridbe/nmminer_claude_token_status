@@ -260,6 +260,12 @@ static void handleInput() {
   InputEvent e = inputPoll();
   if (e.kind == IN_NONE) return;
 
+  if (e.kind == IN_DOUBLE) {     // one-button boards: straight into and out of the menu
+    wake("double tap");
+    if (uiOverlay() == OV_MENU) uiCloseOverlay();
+    else                        uiShowMenu();
+    return;
+  }
   if (e.kind == IN_HOLD) {
     wake("hold");
     if (!HAS_TOUCHSCREEN && uiOverlay() == OV_MENU) { menuAction(uiMenuSelected()); return; }
@@ -358,7 +364,7 @@ void setup() {
 
   if (PANEL_POWER_PIN >= 0) {            // boards that switch the display's power
     pinMode(PANEL_POWER_PIN, OUTPUT);
-    digitalWrite(PANEL_POWER_PIN, HIGH);
+    digitalWrite(PANEL_POWER_PIN, PANEL_POWER_LEVEL);
     delay(20);
   }
   tft.init();
@@ -371,6 +377,7 @@ void setup() {
   blWrite(0);
 
   inputBegin();
+  inputSetHoldIndicator(uiHoldProgress);   // fill the item while the button is held
 
   uiInit();
 #ifdef DEMO_DATA

@@ -743,7 +743,7 @@ int uiChoose(const char *title, const char *const *labels, const char *const *su
       tft.setTextFont(1);
       tft.setTextColor(C_FAINT);
       tft.setTextDatum(MC_DATUM);
-      tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
+      tft.drawString("tap: next   hold: select   double: close", SCR_W / 2, SCR_H - 8);
     }
   };
   paint();
@@ -1006,7 +1006,7 @@ static void drawMenu() {
     tft.setTextFont(1);
     tft.setTextColor(C_FAINT);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
+    tft.drawString("tap: next   hold: select   double: close", SCR_W / 2, SCR_H - 8);
   }
 }
 
@@ -1116,7 +1116,7 @@ bool uiConfirm(const char *title, const char *line, const char *yes, const char 
       tft.setTextFont(1);
       tft.setTextColor(C_FAINT);
       tft.setTextDatum(MC_DATUM);
-      tft.drawString("tap: next    hold: select", SCR_W / 2, SCR_H - 8);
+      tft.drawString("tap: next   hold: select   double: close", SCR_W / 2, SCR_H - 8);
     }
   };
   paint();
@@ -1131,6 +1131,37 @@ bool uiConfirm(const char *title, const char *line, const char *yes, const char 
     if (e.kind != IN_TAP || e.y < by - 10 || e.y > by + bh + 10) continue;
     return e.x < SCR_W / 2;
   }
+}
+
+// How far a hold has got, drawn where the user is looking: the highlighted
+// menu row fills up, and elsewhere a thin bar runs along the bottom. Called
+// from the input layer, so every hold-to-activate screen gets it.
+void uiHoldProgress(float f) {
+  static float shown = -1;
+  if (f == shown) return;
+  bool clearing = f <= 0.01f;
+  if (clearing && shown < 0) return;
+  shown = clearing ? -1 : f;
+
+  if (overlay == OV_MENU && !HAS_TOUCHSCREEN) {
+    int y = MENU_Y0 + menuSel * (MENU_H + MENU_GAP);
+    tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
+    if (!clearing) {
+      int w = (int)(MENU_W * min(f, 1.0f));
+      if (w > 4) tft.fillSmoothRoundRect(MENU_X, y, w, MENU_H, 10,
+                                         tft.alphaBlend(90, C_MARK, rgb(0x16161B)), C_BG);
+    }
+    tft.drawRoundRect(MENU_X, y, MENU_W, MENU_H, 10, C_MARK);
+    tft.setTextFont(2);
+    tft.setTextColor(C_TEXT);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(MENU[menuSel].label, MENU_X + 14, y + MENU_H / 2);
+    return;
+  }
+
+  const int h = 4, y = SCR_H - h;
+  tft.fillRect(0, y, SCR_W, h, C_BG);
+  if (!clearing) tft.fillRect(0, y, (int)(SCR_W * min(f, 1.0f)), h, C_MARK);
 }
 
 // ---------------------------------------------------------------- public

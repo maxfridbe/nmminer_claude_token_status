@@ -72,6 +72,7 @@ void   uiHidePin();
 void   uiShowHotspot(const char *ssid, const char *pass, const char *url);
 void   uiHideHotspot();
 void   uiShowMenu();
+void   uiHoldProgress(float f);       // 0..1 while a hold builds, 0 when it ends
 void   uiShowRemote();                 // the relay's QR, or its progress
 void   uiShowLan(const char *url);     // the page's address on this network
 // A full-screen list to pick from; returns the index picked. A sub line that
