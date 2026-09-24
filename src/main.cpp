@@ -335,20 +335,22 @@ static bool heldAtBoot() {
 
 // Serve the setup page once WiFi is up, if hosting is on or there is nothing
 // to show yet.
-// With no account yet, the board's hotspot stays up so a phone can add one
-// even on a guest network. With hosting on, the page is also on the LAN.
+// On WiFi the board never raises its own hotspot: the relay link works from
+// any network, including the guest WiFi that would block the LAN page, so
+// there is nothing for a second radio to add. The menu still offers it.
 static void maybeStartWeb() {
   if (WiFi.status() != WL_CONNECTED) return;
   bool changed = false;
-  // No account yet, or no way to ask for it on the board: offer the hotspot.
-  // webLoop() drops it after 15 idle minutes once an account exists.
-  static bool offered = false;
   if (accountCount == 0 && relayState() == RELAY_OFF) relayStart();   // shown on the empty screen
-  if ((accountCount == 0 || (!HAS_INPUT && !offered)) && !webHotspotUp()) {
+#if !HAS_INPUT
+  // No touch, no button: the hotspot is the only way in, so offer it once.
+  static bool offered = false;
+  if (!offered && !webHotspotUp()) {
     webStartHotspot();
     offered = true;
     changed = true;
   }
+#endif
   if (cfg.hosting && !wifiLink.url[0]) {
     webStartLan();
     strlcpy(wifiLink.url, webUrl().c_str(), sizeof(wifiLink.url));

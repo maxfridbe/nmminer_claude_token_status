@@ -100,6 +100,9 @@ Touch is calibrated at first boot, like the CrowPanel.
 
 ### NM-TV: the non-touchscreen option
 
+![NM-TV showing its add-account screen](screenshots/nmtv-add-account.jpg)
+
+
 The NM-TV is NMMiner's 1.54" "small TV": the same ESP32 as the CYD, a square
 240x240 screen, and a single touch button on top instead of a touchscreen.
 Everything the CYD does works on it, driven by that one button:
@@ -160,8 +163,11 @@ writes around it.
    code. Scan it with your phone on any network: guest WiFi or mobile data
    both work. On the page that opens, press **Add a Claude account**, name
    it, choose model meters, tap **Open claude.ai**, approve, and paste back
-   the code claude.ai shows. If the relay server can't be reached, the board
-   shows its hotspot's QR code instead (below).
+   the code claude.ai shows.
+
+Once the board is on WiFi it does not run a hotspot of its own: the remote
+link reaches it from any network, so there is nothing a second radio would
+add. **Phone setup** in the menu raises the hotspot when you want it.
 
 ### Three ways to reach the setup page
 
@@ -171,7 +177,7 @@ writes around it.
 |---|---|---|
 | **Remote link** | yes | a one-time link through a public MQTT relay, encrypted end to end. Your phone stays on its own network |
 | **This network (IP address)** | usually not | the board's address, for a phone on the same network. Guest networks keep devices apart, so this screen warns you, louder when the network's name has "guest" in it. Changes need a PIN from the screen |
-| **Board hotspot** | yes | your phone joins the board's own WiFi. No internet while it's joined |
+| **Board hotspot** | yes | your phone joins the board's own WiFi. Only up while you ask for it, and it drops after 15 idle minutes. No internet while it's joined |
 
 #### Remote link
 
@@ -267,8 +273,9 @@ listener must accept the `mqtt` subprotocol.
 #### Board hotspot
 
 The hotspot works on guest networks, which stop devices on them from reaching
-each other. Its password changes every time and appears only on the screen, so
-no PIN is needed on it. While your phone is on the hotspot it has no internet.
+each other. It is off unless you ask for it in the menu, and drops again after
+15 idle minutes. Its password changes every time and appears only on the
+screen, so no PIN is needed on it. While your phone is on the hotspot it has no internet.
 If claude.ai won't load, tap **Copy link**, switch back to your usual network,
 approve there, copy the code, rejoin the hotspot and reopen the page. It picks
 up at the paste step.

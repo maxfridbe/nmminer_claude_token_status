@@ -3,6 +3,7 @@
 #include "model.h"
 #include "settings.h"
 #include "relay.h"
+#include "board.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -391,8 +392,9 @@ void webLoop() {
   if (apMode) dns.processNextRequest();
   server.handleClient();
   if (pin[0] && millis() > pinUntil) { pin[0] = 0; uiHidePin(); }
-  // Stays up while anyone is using it, and always while there's no account.
-  if (hotspotUp && accountCount > 0 && WiFi.softAPgetStationNum() == 0 &&
+  // Stays up while anyone is using it. On a board with no touch and no button
+  // it is the only way in, so it stays until an account exists.
+  if (hotspotUp && (HAS_INPUT || accountCount > 0) && WiFi.softAPgetStationNum() == 0 &&
       millis() - hotspotSeen > HOTSPOT_IDLE_MS)
     stopHotspot();
   if (hotspotUp && WiFi.softAPgetStationNum() > 0) hotspotSeen = millis();

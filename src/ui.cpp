@@ -682,16 +682,30 @@ static void drawRemote(const char *title, const String &footer) {
   RelayState st = relayState();
   String link = relayLink();              // stays valid while the relay reconnects
   if (link.length()) drawQr(tft, J_QR_X, J_QR_Y, J_QR, link.c_str());
-  else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", "retrying; or use the hotspot", C_HOT);
+  else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", SQUARE_SCREEN ? "retrying" : "retrying; or use the menu", C_HOT);
   else qrPlaceholder("Connecting to the relay", relayBrokerName()[0] ? relayBrokerName() : "...", C_SOFT);
 
   const int x = J_X;
-  stepText(x, JY(46), "1", SQUARE_SCREEN ? "Scan it" : "Scan with phone", C_SOFT);
+  const String broker = relayBrokerName()[0] ? relayBrokerName() : "relay";
+#if SQUARE_SCREEN
+  // The column beside the QR is only ~90px, so it holds short labels and the
+  // sentences go full width under the QR rather than being cut off.
+  stepText(x, JY(46), "1", "Scan it", C_SOFT);
+  infoLine(x + J_IN, JY(66), "any WiFi", C_DIM);
+  infoLine(x + J_IN, JY(78), "or mobile", C_DIM);
+  stepText(x, JY(98), "2", "Set up", C_SOFT);
+  infoLine(x + J_IN, JY(118), "on the", C_DIM);
+  infoLine(x + J_IN, JY(130), "page", C_DIM);
+  infoLine(PAD, J_QR_Y + J_QR + 6, "Encrypted end to end", C_DIM);
+  infoLine(PAD, J_QR_Y + J_QR + 18, String("via ") + broker, C_DIM);
+#else
+  stepText(x, JY(46), "1", "Scan with phone", C_SOFT);
   infoLine(x + J_IN, JY(66), "Any network works:", C_DIM);
   infoLine(x + J_IN, JY(78), "guest WiFi, mobile data", C_DIM);
-  stepText(x, JY(98), "2", SQUARE_SCREEN ? "Set up" : "Set up on the page", C_SOFT);
+  stepText(x, JY(98), "2", "Set up on the page", C_SOFT);
   infoLine(x + J_IN, JY(118), "Encrypted end to end", C_DIM);
-  infoLine(x + J_IN, JY(130), String("via ") + (relayBrokerName()[0] ? relayBrokerName() : "relay"), C_DIM);
+  infoLine(x + J_IN, JY(130), String("via ") + broker, C_DIM);
+#endif
   linkFooter(footer);
 }
 
@@ -701,15 +715,28 @@ static void drawLan() {
   linkTitle("This network");
   drawQr(tft, J_QR_X, J_QR_Y, J_QR, lanUrl);
   const int x = J_X;
-  stepText(x, JY(46), "1", SQUARE_SCREEN ? "Scan it" : "Scan with phone", C_SOFT);
+  bool guest = looksLikeGuest(wifiLink.ssid);
+#if SQUARE_SCREEN
+  // Short labels beside the QR; the address and the warning go full width
+  // under it, where there is room for them.
+  stepText(x, JY(46), "1", "Scan it", C_SOFT);
+  infoLine(x + J_IN, JY(66), "phone on", C_DIM);
+  infoLine(x + J_IN, JY(78), wifiLink.ssid, C_DIM);
+  stepText(x, JY(98), "2", "PIN", C_SOFT);
+  infoLine(x + J_IN, JY(118), "on ask", C_DIM);
+  infoLine(PAD, J_QR_Y + J_QR + 6, lanUrl + 7, C_TEXT);
+  infoLine(PAD, J_QR_Y + J_QR + 18,
+           guest ? "Guest WiFi: use Remote link" : "No page? Use Remote link", C_WARN);
+#else
+  stepText(x, JY(46), "1", "Scan with phone", C_SOFT);
   infoLine(x + J_IN, JY(66), String("phone on ") + wifiLink.ssid, C_DIM);
   infoLine(x + J_IN, JY(78), lanUrl + 7, C_TEXT);
-  stepText(x, JY(98), "2", SQUARE_SCREEN ? "PIN" : "Enter the PIN", C_SOFT);
+  stepText(x, JY(98), "2", "Enter the PIN", C_SOFT);
   infoLine(x + J_IN, JY(118), "shown here on request", C_DIM);
-  bool guest = looksLikeGuest(wifiLink.ssid);
   infoLine(x, JY(146), guest ? "Looks like guest WiFi:" : "Guest WiFi blocks this.", C_WARN);
   infoLine(x, JY(158), guest ? "phones can't reach the" : "If the page won't load,", C_WARN);
   infoLine(x, JY(170), guest ? "board. Use Remote link." : "use Remote link instead.", C_WARN);
+#endif
   linkFooter("Tap to close.");
 }
 
@@ -1010,12 +1037,12 @@ static void drawMenu() {
   }
 }
 
-// No accounts yet: the hotspot is up, so show how to join it.
+// No accounts yet: point a phone at the relay link, which works from any
+// network. The hotspot only appears here if something raised it (the menu, or
+// a board with no way to ask), and then it takes over the screen.
 static void drawEmptyScreen() {
-  if (relayState() == RELAY_UP) {
-    String footer;
-    if (webHotspotUp()) footer = String("Or join ") + webApSsid() + "  pw " + webApPass() + "  -> " + (webHotspotUrl().c_str() + 7);
-    drawRemote("Add account", footer);
+  if (!webHotspotUp() && relayState() != RELAY_OFF) {
+    drawRemote("Add account", "");
     return;
   }
   if (webHotspotUp()) {
