@@ -111,23 +111,76 @@ InputEvent inputPoll() {
 
 // Either an ESP32 touch pad (reads drop when touched) or a touch IC with a
 // digital output; which one, and on which pin, comes from env:nmtv-probe.
-static uint16_t padBase = 0;
+static uint16_t padBase = 0;     // the resting reading
+static bool     everPressed = false;
+
+#if BUTTON_TOUCHPAD
+// Touch reads are noisy: the middle of three throws out the stray one.
+static uint16_t padRead() {
+  uint16_t a = touchRead(BUTTON_PIN), b = touchRead(BUTTON_PIN), c = touchRead(BUTTON_PIN);
+  return max(min(a, b), min(max(a, b), c));
+}
+// A finger drops this pad about 20% (101 resting, 78 pressed). Trigger at
+// half that, and let go later than it grabs, so a hold can't stutter.
+static uint16_t padThreshold()   { return padBase - padBase / 8; }
+static uint16_t padRelease()     { return padBase - padBase / 16; }
+#endif
 
 void inputBegin() {
   if (BUTTON_PIN < 0) return;
 #if BUTTON_TOUCHPAD
+  padRead();                      // the first read after boot means nothing
+  delay(20);
   uint32_t sum = 0;
-  for (int i = 0; i < 16; i++) { sum += touchRead(BUTTON_PIN); delay(5); }
+  for (int i = 0; i < 16; i++) { sum += padRead(); delay(5); }
   padBase = sum / 16;
+  Serial.printf("[input] touch pad GPIO%d resting at %u, press reads under %u\n",
+                BUTTON_PIN, padBase, padThreshold());
 #else
   pinMode(BUTTON_PIN, BUTTON_ACTIVE == LOW ? INPUT_PULLUP : INPUT);
 #endif
 }
 
+// The resting level drifts with temperature, and WiFi starting after
+// inputBegin() moves it too, so it follows the idle reading rather than
+// staying where boot left it. Only readings at rest feed that drift: a
+// near-miss press must not drag the threshold down past itself, which is a
+// button that stops working the harder it is pressed.
 bool inputPressed() {
   if (BUTTON_PIN < 0) return false;
 #if BUTTON_TOUCHPAD
-  return touchRead(BUTTON_PIN) < padBase * 3 / 4;
+  uint16_t v = padRead();
+  if (!v) return false;                          // peripheral not answering
+  static bool pressed = false;
+  if (padBase > 16) pressed = v < (pressed ? padRelease() : padThreshold());
+  // Nobody holds a button for ten seconds. If it looks that way the resting
+  // level moved under us, so take the reading as the new rest.
+  static uint32_t pressedSince = 0;
+  if (!pressed) pressedSince = 0;
+  else if (!pressedSince) pressedSince = millis();
+  else if (millis() - pressedSince > 10000) {
+    Serial.printf("[pad] stuck low at %u, re-resting (was %u)\n", v, padBase);
+    padBase = v;
+    pressed = false;
+    pressedSince = 0;
+  }
+  static uint32_t driftAt = 0;
+  if (v >= padRelease() && millis() - driftAt > 250) {
+    driftAt = millis();
+    padBase = padBase ? (uint16_t)((padBase * 7 + v) / 8) : v;
+  }
+  // Until the first press lands, say what the pad reads: a button that never
+  // registers looks exactly like one nobody touched.
+  static uint32_t traceAt = 0;
+  if (!everPressed && millis() - traceAt > 1000) {
+    traceAt = millis();
+    Serial.printf("[pad] %u (resting %u, press under %u)\n", v, padBase, padThreshold());
+  }
+  if (pressed && !everPressed) {
+    everPressed = true;
+    Serial.printf("[pad] first press: %u (resting %u)\n", v, padBase);
+  }
+  return pressed;
 #else
   return digitalRead(BUTTON_PIN) == BUTTON_ACTIVE;
 #endif
