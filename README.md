@@ -291,9 +291,27 @@ Press and hold the screen for about 1.5 seconds:
 | WiFi with a phone | restarts into the setup hotspot |
 | Update firmware | checks GitHub for the latest release and installs it over the air. **Versions** lists every installable release, so you can also go back to an older one |
 | Calibrate touch | touchscreens that need it (CrowPanel, E32R40T): touch each corner arrow |
+| Rotate screen | **Stand on end** / **Lay flat**, on any board that isn't square. Saves and restarts, since the screen's size is set at boot (see below) |
 | Wipe all settings | erases WiFi, accounts and logins after a confirmation, then restarts into first-time setup |
 | Brightness − / + , Light / Dark | brightness in 10% steps and the light or dark theme, applied at once and saved a few seconds later. The NM-TV lists them as entries: holding on Brightness steps through 10, 25, 50, 75 and 100% |
 | Restart / Close | |
+
+#### Standing it on end
+
+The 2.8" and 4" boards can be turned upright, from the menu or from the setup
+page. The panes then split with a horizontal rule instead of a vertical one:
+
+| | Landscape | Portrait |
+|---|---|---|
+| One account | big ring on the left, meters on the right | ring above, meters full width under it |
+| Two accounts | side by side, split by a vertical rule | stacked, split by a horizontal rule, each with its ring beside its meters |
+| Three or more | two at a time, paged sideways | two at a time, paged up and down |
+
+The WiFi strip stays on the right edge either way. The setting is read at boot,
+because the screen's size decides how much memory the off-screen buffer takes,
+so changing it restarts the board. On a board with a calibrated touchscreen the
+calibration is dropped at the same time: those corners belonged to the old
+rotation, so the next boot asks for them again.
 
 Changing WiFi never touches accounts or logins. A new network is tested before
 it's saved, and cancelling keeps the old one. If the old network is gone and

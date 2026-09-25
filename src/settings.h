@@ -25,6 +25,7 @@ struct Settings {
   char       refreshScope[96];
   bool       hosting;       // serve the setup website on the LAN
   bool       lightMode;     // dark text on a light background (theme.h)
+  bool       portrait;      // stand the board on end: panes stack instead of sitting side by side
   char       relay[128];    // remote-setup MQTT server: "" = automatic (see relay.h)
   uint16_t   pageSeconds;
   uint16_t   touchCal[5];   // TFT_eSPI touch calibration, saved after running it
@@ -43,6 +44,7 @@ void settingsLoad();                 // NVS, seeded from secrets.h when it chang
 void settingsSave();                 // everything except tokens
 void settingsSaveTokens(int i);
 void settingsSaveTouchCal();
+void settingsForgetTouchCal();   // after a rotation: the old corners no longer mean anything
 bool settingsHaveWifi();
 int  settingsFindAccount(const char *alias);
 void settingsRemoveAccount(int i);

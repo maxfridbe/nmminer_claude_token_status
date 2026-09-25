@@ -14,7 +14,7 @@ extern TFT_eSPI tft;
 // Everything here is laid out for 320x240 and scaled from it, so the 4"
 // 480x320 screen gets bigger keys rather than a small keyboard in a corner.
 #define SX(v) ((v) * SCR_W / 320)
-#define BIG   (SCR_H >= 320)
+#define BIG   BIG_PANEL       // font size follows the panel, not which way up it is
 #define HEAD_H (BIG ? 34 : 26)
 
 static uint16_t cBg, cKey, cKeyHi, cText, cDim, cAccent, cBad;

@@ -18,15 +18,20 @@
 
 extern TFT_eSPI tft;
 
-// Screen size comes from board.h. The CYD shows two 153px columns and a WiFi
-// strip; square screens show one account per page.
+// Screen size comes from board.h and depends on which way up the board
+// stands. Landscape: two 153px columns side by side and a WiFi strip down the
+// right edge. Portrait: the same strip, but the panes stack, split by a
+// horizontal rule. Square screens show one account per page either way.
 #if SQUARE_SCREEN
 #define LINK_W 0
+#define PORTRAIT false
 #define COL_W  SCR_W
 #else
-#define LINK_W 14                        // right-edge WiFi strip
-#define COL_W  ((SCR_W - LINK_W) / 2)    // 153
+#define LINK_W 14                        // WiFi strip, down the right edge either way
+#define PORTRAIT (cfg.portrait)
+#define COL_W  (PORTRAIT ? SCR_W - LINK_W : (SCR_W - LINK_W) / 2)
 #endif
+#define BOARD_W (SCR_W - LINK_W)         // accounts area: two columns, or one stack
 #define PAD    12
 
 #define RING_A0  30     // TFT_eSPI arcs: 0 deg at 6 o'clock, clockwise
@@ -34,8 +39,9 @@ extern TFT_eSPI tft;
 #define MAX_ROWS 2
 
 // 480x320 screens get the same layout, scaled up, and render each pane in
-// two halves so the off-screen buffer stays small next to TLS.
-#define BIG_SCREEN (SCR_H >= 320)
+// two halves so the off-screen buffer stays small next to TLS. It follows the
+// panel, not the screen: turning a board on end must not change its type.
+#define BIG_SCREEN BIG_PANEL
 #if BIG_SCREEN
 #define NAME_Y   24
 #define PLAN_Y   48
@@ -102,12 +108,12 @@ void uiInit() {
   colSpr.setColorDepth(16);
 #if SQUARE_SCREEN
   haveColSpr = colSpr.createSprite(SCR_W, SCR_H / 2) != nullptr;   // drawn in two halves
-#elif BIG_SCREEN
-  haveColSpr = colSpr.createSprite(COL_W, SCR_H / 2) != nullptr;   // drawn in two halves
-  linkSpr.setColorDepth(16);
-  haveLinkSpr = linkSpr.createSprite(LINK_W, SCR_H) != nullptr;
 #else
-  haveColSpr = colSpr.createSprite(COL_W, SCR_H) != nullptr;
+  // A pane is drawn in slices so the buffer stays small next to TLS. In
+  // portrait the panes are full width, so the slices are quarter-height,
+  // which divides both a half-screen pane and a whole-screen one.
+  if (PORTRAIT) haveColSpr = colSpr.createSprite(COL_W, SCR_H / 4) != nullptr;
+  else          haveColSpr = colSpr.createSprite(COL_W, BIG_SCREEN ? SCR_H / 2 : SCR_H) != nullptr;
   linkSpr.setColorDepth(16);
   haveLinkSpr = linkSpr.createSprite(LINK_W, SCR_H) != nullptr;
 #endif
@@ -197,8 +203,8 @@ static void drawBar(TFT_eSPI &g, int x, int y, int w, int h, float pct, bool sta
 }
 
 // Model name and reset time on top, meter with percentage beneath.
-static void drawRow(TFT_eSPI &g, int ox, int y, const Bucket &b, bool stale) {
-  const int x0 = ox + PAD, x1 = ox + COL_W - PAD;
+static void drawRow(TFT_eSPI &g, int ox, int y, int w, const Bucket &b, bool stale) {
+  const int x0 = ox + PAD, x1 = ox + w - PAD;
 
   char rs[16];
   fmtReset(b.resetsAt, true, rs, sizeof(rs));
@@ -283,7 +289,11 @@ static void drawResetLine(TFT_eSPI &g, int cx, int y, int maxW, const Account &a
   const char *pre = strcmp(rs, "now") ? "resets in " : "resets ";
   g.setTextFont(2);
   int w1 = g.textWidth(pre), w2 = g.textWidth(rs);
-  int x = cx - (w1 + w2) / 2;
+  // Centred on the ring, which can be narrower than the line: give up the
+  // word before giving up the edge, and never start outside the span.
+  if (w1 + w2 > maxW) { pre = strcmp(rs, "now") ? "in " : ""; w1 = g.textWidth(pre); }
+  if (w1 + w2 > maxW) { pre = ""; w1 = 0; }
+  int x = max(cx - (w1 + w2) / 2, cx - maxW / 2);
   g.setTextDatum(ML_DATUM);
   g.setTextColor(C_DIM);
   g.drawString(pre, x, y);
@@ -331,7 +341,7 @@ static void drawColumn(TFT_eSPI &g, int ox, int oy, const Account &a, bool ruleR
   int no = a.everOk ? a.nBuckets - first : 0;
   int shown = no <= MAX_ROWS ? no : MAX_ROWS - 1;
   for (int r = 0; r < shown; r++)
-    drawRow(g, ox, oy + ROW_Y0 + r * ROW_H, a.buckets[first + r], stale);
+    drawRow(g, ox, oy + ROW_Y0 + r * ROW_H, COL_W, a.buckets[first + r], stale);
   if (no > shown) {
     char more[20];
     snprintf(more, sizeof(more), "+%d more", no - shown);
@@ -340,6 +350,74 @@ static void drawColumn(TFT_eSPI &g, int ox, int oy, const Account &a, bool ruleR
     g.setTextDatum(TL_DATUM);
     g.drawString(more, ox + PAD, oy + ROW_Y0 + shown * ROW_H);
   }
+}
+
+// ---------------------------------------------------------------- portrait
+
+// Stood on end, the screen splits with a horizontal rule instead of a
+// vertical one, so a pane is wide and short rather than tall and narrow.
+// Geometry is computed from the pane's height rather than fixed, because the
+// same code draws one account down the whole screen and two sharing it.
+
+// Two accounts: the ring sits beside the meters, since stacking them would
+// not fit in half a screen.
+static void drawPortraitWide(TFT_eSPI &g, int oy, int h, const Account &a, bool ruleBelow) {
+  const int w = COL_W;
+  const bool stale = !a.ok && a.everOk;
+  const Bucket *s = sessionOf(a);
+
+  g.fillRect(0, oy, w, h, C_BG);
+  if (ruleBelow) g.drawFastHLine(PAD, oy + h - 1, w - 2 * PAD, C_RULE);
+  drawHeader(g, 0, oy, a, w);
+
+  const int top    = BIG_SCREEN ? 62 : 50;              // clear of the header
+  const int bodyH  = h - top - (BIG_SCREEN ? 22 : 18);  // leave the week bar its line
+  const int r      = min((bodyH - 20) / 2, w / 5);
+  const int cx     = PAD + r + 2;
+  const int cy     = oy + top + r;
+  drawRing(g, cx, cy, r, r - (BIG_SCREEN ? 14 : 10), s, stale,
+           BIG_SCREEN ? &FreeSansBold18pt7b : &FreeSansBold12pt7b, BIG_SCREEN ? 19 : 14);
+  drawResetLine(g, cx, cy + r + (BIG_SCREEN ? 14 : 10), 2 * (cx - PAD), a, s);
+
+  const int rx = cx + r + (BIG_SCREEN ? 14 : 8);        // meters fill the rest
+  const int rw = w - rx;
+  const int first = s ? 1 : 0;
+  const int no    = a.everOk ? a.nBuckets - first : 0;
+  const int shown = min(no, MAX_ROWS);
+  const int gap   = ROW_H + (BIG_SCREEN ? 12 : 6);
+  int ry = oy + top + max(0, (bodyH - shown * gap) / 2);
+  for (int i = 0; i < shown; i++) drawRow(g, rx, ry + i * gap, rw, a.buckets[first + i], stale);
+  drawWeekBar(g, rx + PAD, w - PAD, oy + h - (BIG_SCREEN ? 18 : 14), a);
+}
+
+// One account, down the whole screen: back to a vertical stack, with the
+// meters full width.
+static void drawPortraitTall(TFT_eSPI &g, int oy, int h, const Account &a) {
+  const int w = COL_W;
+  const bool stale = !a.ok && a.everOk;
+  const Bucket *s = sessionOf(a);
+
+  g.fillRect(0, oy, w, h, C_BG);
+  drawHeader(g, 0, oy, a, w);
+
+  const int top   = BIG_SCREEN ? 70 : 56;
+  const int first = s ? 1 : 0;
+  const int no    = a.everOk ? a.nBuckets - first : 0;
+  const int shown = min(no, MAX_ROWS + 1);
+  const int gap   = ROW_H + (BIG_SCREEN ? 16 : 8);
+  const int rowsH = shown * gap;
+  // The ring takes what the meters and the two lines under it don't need.
+  const int foot  = BIG_SCREEN ? 56 : 44;
+  const int r     = min((h - top - rowsH - foot) / 2, w / 3);
+  const int cx    = w / 2;
+  const int cy    = oy + top + r;
+  drawRing(g, cx, cy, r, r - (BIG_SCREEN ? 20 : 14), s, stale,
+           r >= 70 ? &FreeSansBold24pt7b : RING_FONT, r >= 70 ? 26 : RING_LABEL);
+  drawResetLine(g, cx, cy + r + (BIG_SCREEN ? 22 : 16), w - PAD * 2, a, s);
+  drawWeekBar(g, PAD, w - PAD, cy + r + (BIG_SCREEN ? 40 : 30), a);
+
+  int ry = oy + h - rowsH - (BIG_SCREEN ? 14 : 8);
+  for (int i = 0; i < shown; i++) drawRow(g, 0, ry + i * gap, w, a.buckets[first + i], stale);
 }
 
 // ---------------------------------------------------------------- single account
@@ -569,21 +647,24 @@ static void stepText(int x, int y, const char *num, const char *text, uint16_t c
 
 // Where drawJoin puts its text column, per screen. J_IN indents the detail
 // lines under each numbered step.
+// A screen stood on end is as narrow as a square one, so it lays these out
+// the same way: small QR, short labels in the column beside it.
+#define NARROW (SQUARE_SCREEN || PORTRAIT)
 #if SQUARE_SCREEN
 #define J_QR_X 4
 #define J_QR_Y 40
 #define J_QR   128
 #define J_X    138
 #elif BIG_SCREEN
-#define J_QR_X 12
-#define J_QR_Y 46
-#define J_QR   252
-#define J_X    280
+#define J_QR_X (PORTRAIT ? 6 : 12)
+#define J_QR_Y (PORTRAIT ? 44 : 46)
+#define J_QR   (PORTRAIT ? 160 : 252)
+#define J_X    (PORTRAIT ? 172 : 280)
 #else
-#define J_QR_X 10
+#define J_QR_X (PORTRAIT ? 4 : 10)
 #define J_QR_Y 40
-#define J_QR   150
-#define J_X    172
+#define J_QR   (PORTRAIT ? 128 : 150)
+#define J_X    (PORTRAIT ? 138 : 172)
 #endif
 #define J_IN   (BIG_SCREEN ? 22 : 14)
 #define JY(v)  ((v) * SCR_H / 240)
@@ -598,18 +679,18 @@ static void drawJoin(const char *title, const char *ssid, const char *pass, cons
   snprintf(wifiQr, sizeof(wifiQr), "WIFI:T:WPA;S:%s;P:%s;;", ssid, pass);
   drawQr(tft, J_QR_X, J_QR_Y, J_QR, wifiQr);
   const int x = J_X;
-#if SQUARE_SCREEN
-  // 240x240: title across the top, QR bottom-left, steps to its right.
-  drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-  if (!strncmp(url, "http://", 7)) url += 7;         // the column is narrow
-  if (!strncmp(ssid, "claude-status-", 14)) ssid += 14 - 3;   // "...b4c8"
-#else
-  drawMark(tft, x, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-#endif
+  if (NARROW) {
+    // Narrow: title across the top, QR below left, steps to its right.
+    drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+    if (!strncmp(url, "http://", 7)) url += 7;         // the column is narrow
+    if (!strncmp(ssid, "claude-status-", 14)) ssid += 14 - 3;   // "...b4c8"
+  } else {
+    drawMark(tft, x, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  }
   tft.setFreeFont(BIG_SCREEN ? &FreeSansBold12pt7b : &FreeSansBold9pt7b);
   tft.setTextColor(C_TEXT);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString(title, SQUARE_SCREEN ? PAD + 24 : x + 24, SQUARE_SCREEN ? 18 : JY(21));
+  tft.drawString(title, NARROW ? PAD + 24 : x + 24, NARROW ? 18 : JY(21));
 
   stepText(x, JY(46), "1", "Scan to join", C_SOFT);
   tft.setTextFont(BIG_SCREEN ? 2 : 1);
@@ -625,7 +706,7 @@ static void drawJoin(const char *title, const char *ssid, const char *pass, cons
   tft.setTextFont(BIG_SCREEN ? 2 : 1);
   tft.setTextColor(C_FAINT);
   tft.setTextDatum(BL_DATUM);
-  tft.drawString(fit(tft, footer, SCR_W - 16), SQUARE_SCREEN ? 6 : J_QR_X, SCR_H - 6);
+  tft.drawString(fit(tft, footer, SCR_W - 16), NARROW ? 6 : J_QR_X, SCR_H - 6);
 }
 
 static char lanUrl[40];          // for the "This network" screen
@@ -639,22 +720,19 @@ static void infoLine(int x, int y, const String &s, uint16_t col) {
 
 static void linkTitle(const char *title) {
   tft.fillScreen(C_BG);
-#if SQUARE_SCREEN
-  drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-#else
-  drawMark(tft, J_X, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
-#endif
+  if (NARROW) drawMark(tft, PAD, 9, CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
+  else        drawMark(tft, J_X, JY(12), CLAUDE_MARK_18, CLAUDE_MARK_18_ALPHA);
   tft.setFreeFont(BIG_SCREEN ? &FreeSansBold12pt7b : &FreeSansBold9pt7b);
   tft.setTextColor(C_TEXT);
   tft.setTextDatum(ML_DATUM);
-  tft.drawString(title, SQUARE_SCREEN ? PAD + 24 : J_X + 24, SQUARE_SCREEN ? 18 : JY(21));
+  tft.drawString(title, NARROW ? PAD + 24 : J_X + 24, NARROW ? 18 : JY(21));
 }
 
 static void linkFooter(const String &s) {
   tft.setTextFont(BIG_SCREEN ? 2 : 1);
   tft.setTextColor(C_FAINT);
   tft.setTextDatum(BL_DATUM);
-  tft.drawString(fit(tft, s, SCR_W - 16), SQUARE_SCREEN ? 6 : J_QR_X, SCR_H - 6);
+  tft.drawString(fit(tft, s, SCR_W - 16), NARROW ? 6 : J_QR_X, SCR_H - 6);
 }
 
 // Text centred in the QR's square, while there's no QR to show.
@@ -682,12 +760,12 @@ static void drawRemote(const char *title, const String &footer) {
   RelayState st = relayState();
   String link = relayLink();              // stays valid while the relay reconnects
   if (link.length()) drawQr(tft, J_QR_X, J_QR_Y, J_QR, link.c_str());
-  else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", SQUARE_SCREEN ? "retrying" : "retrying; or use the menu", C_HOT);
+  else if (st == RELAY_FAILED) qrPlaceholder("Relay unreachable", NARROW ? "retrying" : "retrying; or use the menu", C_HOT);
   else qrPlaceholder("Connecting to the relay", relayBrokerName()[0] ? relayBrokerName() : "...", C_SOFT);
 
   const int x = J_X;
   const String broker = relayBrokerName()[0] ? relayBrokerName() : "relay";
-#if SQUARE_SCREEN
+  if (NARROW) {
   // The column beside the QR is only ~90px, so it holds short labels and the
   // sentences go full width under the QR rather than being cut off.
   stepText(x, JY(46), "1", "Scan it", C_SOFT);
@@ -698,14 +776,14 @@ static void drawRemote(const char *title, const String &footer) {
   infoLine(x + J_IN, JY(130), "page", C_DIM);
   infoLine(PAD, J_QR_Y + J_QR + 6, "Encrypted end to end", C_DIM);
   infoLine(PAD, J_QR_Y + J_QR + 18, String("via ") + broker, C_DIM);
-#else
+  } else {
   stepText(x, JY(46), "1", "Scan with phone", C_SOFT);
   infoLine(x + J_IN, JY(66), "Any network works:", C_DIM);
   infoLine(x + J_IN, JY(78), "guest WiFi, mobile data", C_DIM);
   stepText(x, JY(98), "2", "Set up on the page", C_SOFT);
   infoLine(x + J_IN, JY(118), "Encrypted end to end", C_DIM);
   infoLine(x + J_IN, JY(130), String("via ") + broker, C_DIM);
-#endif
+  }
   linkFooter(footer);
 }
 
@@ -716,7 +794,7 @@ static void drawLan() {
   drawQr(tft, J_QR_X, J_QR_Y, J_QR, lanUrl);
   const int x = J_X;
   bool guest = looksLikeGuest(wifiLink.ssid);
-#if SQUARE_SCREEN
+  if (NARROW) {
   // Short labels beside the QR; the address and the warning go full width
   // under it, where there is room for them.
   stepText(x, JY(46), "1", "Scan it", C_SOFT);
@@ -727,7 +805,7 @@ static void drawLan() {
   infoLine(PAD, J_QR_Y + J_QR + 6, lanUrl + 7, C_TEXT);
   infoLine(PAD, J_QR_Y + J_QR + 18,
            guest ? "Guest WiFi: use Remote link" : "No page? Use Remote link", C_WARN);
-#else
+  } else {
   stepText(x, JY(46), "1", "Scan with phone", C_SOFT);
   infoLine(x + J_IN, JY(66), String("phone on ") + wifiLink.ssid, C_DIM);
   infoLine(x + J_IN, JY(78), lanUrl + 7, C_TEXT);
@@ -736,7 +814,7 @@ static void drawLan() {
   infoLine(x, JY(146), guest ? "Looks like guest WiFi:" : "Guest WiFi blocks this.", C_WARN);
   infoLine(x, JY(158), guest ? "phones can't reach the" : "If the page won't load,", C_WARN);
   infoLine(x, JY(170), guest ? "board. Use Remote link." : "use Remote link instead.", C_WARN);
-#endif
+  }
   linkFooter("Tap to close.");
 }
 
@@ -797,7 +875,7 @@ int uiChoose(const char *title, const char *const *labels, const char *const *su
 
 void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
   drawJoin("WiFi setup", apSsid, apPass, url, "Pick WiFi",
-           SQUARE_SCREEN ? "Power-cycle to cancel" : "Accounts and logins are kept. Power-cycle to cancel.");
+           NARROW ? "Power-cycle to cancel" : "Accounts and logins are kept. Power-cycle to cancel.");
   if (!HAS_TOUCHSCREEN) return;
   // Or skip the phone: type the WiFi password on this screen.
   tft.fillSmoothRoundRect(SETUP_BTN_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, 9, C_MARK, C_BG);
@@ -843,7 +921,7 @@ void uiShowHotspot(const char *ssid, const char *pass, const char *url) {
 }
 
 static void drawPinOverlay() {
-  const int area = SQUARE_SCREEN ? SCR_W : 2 * COL_W;
+  const int area = BOARD_W;
   const int w = min(240, SCR_W - 16), h = 120, x = (area - w) / 2, y = (SCR_H - h) / 2;
   tft.fillSmoothRoundRect(x, y, w, h, 12, C_PANEL, C_BG);
   tft.drawRoundRect(x, y, w, h, 12, C_MARK);
@@ -875,6 +953,9 @@ static const MenuEntry MENU[] = {
 #if TOUCH_VIA_TFT
   {MA_CALIBRATE,   "Calibrate touch",     ""},
 #endif
+#if CAN_ROTATE
+  {MA_ROTATE,      "Rotate screen",       ""},
+#endif
   {MA_WIPE,        "Wipe all settings",   ""},
 #if !HAS_TOUCHSCREEN
   {MA_BRIGHT,      "Brightness",          ""},   // touchscreens get a - / + row instead
@@ -895,20 +976,23 @@ static const MenuEntry MENU[] = {
 #define MENU_X    12
 #if BIG_SCREEN
 #define MENU_Y0   44
-#define MENU_H    46
+#define MENU_H0   46
 #define MENU_GAP  8
 #else
 #define MENU_Y0   34
-#define MENU_H    34
+#define MENU_H0   34
 #define MENU_GAP  6
 #endif
 #else
 #define MENU_ROWS MENU_ENTRIES
 #define MENU_X    12
 #define MENU_Y0   28
-#define MENU_H    23
+#define MENU_H0   23
 #define MENU_GAP  2
 #endif
+// Rows are as tall as they can be without running off the bottom: boards
+// differ in how many entries they show, and a board on end has more room.
+#define MENU_H   min((int)MENU_H0, (SCR_H - MENU_Y0 - 8) / MENU_ROWS - MENU_GAP)
 #define MENU_W   (SCR_W - 2 * MENU_X)
 
 MenuAction uiMenuHit(int x, int y) {
@@ -1021,6 +1105,7 @@ static void drawMenu() {
     char label[32];
     if (MENU[i].act == MA_BRIGHT) snprintf(label, sizeof(label), "Brightness %d%%", cfg.brightness);
     else if (MENU[i].act == MA_THEME) strlcpy(label, cfg.lightMode ? "Dark mode" : "Light mode", sizeof(label));
+    else if (MENU[i].act == MA_ROTATE) strlcpy(label, PORTRAIT ? "Lay flat" : "Stand on end", sizeof(label));
     else strlcpy(label, MENU[i].label, sizeof(label));
     tft.drawString(label, MENU_X + 14, y + (sub ? 11 : MENU_H / 2));
     if (sub) {
@@ -1163,14 +1248,19 @@ bool uiConfirm(const char *title, const char *line, const char *yes, const char 
 // How far a hold has got, drawn where the user is looking: the highlighted
 // menu row fills up, and elsewhere a thin bar runs along the bottom. Called
 // from the input layer, so every hold-to-activate screen gets it.
+// Only a one-button board needs this: on a touchscreen you tap what you
+// want, so there is nothing for a hold to count down to.
 void uiHoldProgress(float f) {
+#if HAS_TOUCHSCREEN
+  (void)f;
+#else
   static float shown = -1;
   if (f == shown) return;
   bool clearing = f <= 0.01f;
   if (clearing && shown < 0) return;
   shown = clearing ? -1 : f;
 
-  if (overlay == OV_MENU && !HAS_TOUCHSCREEN) {
+  if (overlay == OV_MENU) {
     int y = MENU_Y0 + menuSel * (MENU_H + MENU_GAP);
     tft.fillSmoothRoundRect(MENU_X, y, MENU_W, MENU_H, 10, rgb(0x16161B), C_BG);
     if (!clearing) {
@@ -1189,6 +1279,7 @@ void uiHoldProgress(float f) {
   const int h = 4, y = SCR_H - h;
   tft.fillRect(0, y, SCR_W, h, C_BG);
   if (!clearing) tft.fillRect(0, y, (int)(SCR_W * min(f, 1.0f)), h, C_MARK);
+#endif
 }
 
 // ---------------------------------------------------------------- public
@@ -1197,7 +1288,7 @@ void uiHoldProgress(float f) {
 void uiDrawStatus() {
   if (overlay == OV_MENU || overlay == OV_HOTSPOT || overlay == OV_REMOTE || overlay == OV_LAN) return;
   uint16_t c = netStatus == NET_CHECKING ? C_INFO : C_BG;
-  tft.fillSmoothCircle(SQUARE_SCREEN ? SCR_W - 5 : 2 * COL_W - 8, SQUARE_SCREEN ? 4 : 7, 3, c, C_BG);
+  tft.fillSmoothCircle(BOARD_W - (SQUARE_SCREEN ? 5 : 8), SQUARE_SCREEN ? 4 : 7, 3, c, C_BG);
 }
 
 // Accounts per page: one on a square screen, two side by side otherwise.
@@ -1233,36 +1324,62 @@ static void pushPane(int x, void (*draw)(TFT_eSPI &, int, int, const Account &),
   colSpr.pushSprite(x, 0);
 #endif
 }
+// Portrait panes are pushed a slice at a time. Slice height divides the pane
+// height exactly, so no push ever spills past the pane.
+static void pushPortrait(int oy, int h, const Account &a, bool ruleBelow, bool tall) {
+  if (!haveColSpr) {
+    if (tall) drawPortraitTall(tft, oy, h, a);
+    else      drawPortraitWide(tft, oy, h, a, ruleBelow);
+    return;
+  }
+  const int sh = colSpr.height();
+  for (int y = 0; y < h; y += sh) {
+    if (tall) drawPortraitTall(colSpr, -y, h, a);
+    else      drawPortraitWide(colSpr, -y, h, a, ruleBelow);
+    colSpr.pushSprite(0, oy + y);
+  }
+}
+
 static void columnWithRule(TFT_eSPI &g, int ox, int oy, const Account &a) { drawColumn(g, ox, oy, a, true); }
 static void columnPlain(TFT_eSPI &g, int ox, int oy, const Account &a)    { drawColumn(g, ox, oy, a, false); }
 
 // Dots for every account (the visible pair lit) and arrows at the edges
 // that have more beyond them.
 static void drawScrollHints() {
-  const int y = SCR_H - 5, gap = 10;
-  int x = COL_W - (accountCount - 1) * gap / 2;
+  const int gap = 10;
+  const int mid = BOARD_W / 2;
+  int x = mid - (accountCount - 1) * gap / 2;
   for (int i = 0; i < accountCount; i++, x += gap) {
     bool lit = i == firstVisible || i == firstVisible + 1;
-    tft.fillSmoothCircle(x, y, lit ? 2 : 1, lit ? C_SOFT : C_FAINT, C_BG);
+    tft.fillSmoothCircle(x, SCR_H - 5, lit ? 2 : 1, lit ? C_SOFT : C_FAINT, C_BG);
+  }
+  // Arrows point the way the panes move: sideways in landscape, up and down
+  // when they are stacked.
+  if (PORTRAIT) {
+    if (firstVisible > 0)
+      tft.fillTriangle(mid, 1, mid - 5, 6, mid + 5, 6, C_DIM);
+    if (firstVisible + 2 < accountCount)
+      tft.fillTriangle(mid, SCR_H - 12, mid - 5, SCR_H - 17, mid + 5, SCR_H - 17, C_DIM);
+    return;
   }
   const int my = SCR_H / 2;
   if (firstVisible > 0)
     tft.fillTriangle(1, my, 5, my - 5, 5, my + 5, C_DIM);
   if (firstVisible + 2 < accountCount)
-    tft.fillTriangle(2 * COL_W - 2, my, 2 * COL_W - 6, my - 5, 2 * COL_W - 6, my + 5, C_DIM);
+    tft.fillTriangle(BOARD_W - 2, my, BOARD_W - 6, my - 5, BOARD_W - 6, my + 5, C_DIM);
 }
 
 void uiDrawAll() {
   if (overlay == OV_MENU) { drawMenu(); return; }
   if (overlay == OV_REMOTE) {
-    drawRemote("Remote setup", SQUARE_SCREEN ? "Tap to close. One-time link."
+    drawRemote("Remote setup", NARROW ? "Tap to close. One-time link."
                                : "One-time link, new each time. Ends after 15 idle min. Tap to close.");
     return;
   }
   if (overlay == OV_LAN) { drawLan(); return; }
   if (overlay == OV_HOTSPOT) {
-    drawJoin("Phone setup", hsSsid, hsPass, hsUrl, SQUARE_SCREEN ? "Settings" : "Accounts & settings",
-             SQUARE_SCREEN ? "Tap to close. Off after 15 idle min"
+    drawJoin("Phone setup", hsSsid, hsPass, hsUrl, NARROW ? "Settings" : "Accounts & settings",
+             NARROW ? "Tap to close. Off after 15 idle min"
                            : "Tap to close. The hotspot turns off after 15 idle minutes.");
     return;
   }
@@ -1287,6 +1404,15 @@ void uiDrawAll() {
 #endif
   if (accountCount == 0) {
     drawEmptyScreen();
+  } else if (PORTRAIT) {
+    if (accountCount == 1) {
+      pushPortrait(0, SCR_H, accounts[0], false, true);
+    } else {
+      firstVisible = constrain(firstVisible, 0, max(0, accountCount - 2));
+      pushPortrait(0, SCR_H / 2, accounts[firstVisible], true, false);
+      pushPortrait(SCR_H / 2, SCR_H / 2, accounts[firstVisible + 1], false, false);
+      if (accountCount > 2) drawScrollHints();
+    }
   } else if (accountCount == 1) {
     pushPane(0, drawWideLeft, accounts[0]);
     pushPane(COL_W, drawWideRight, accounts[0]);
@@ -1296,8 +1422,8 @@ void uiDrawAll() {
     pushPane(COL_W, columnPlain, accounts[firstVisible + 1]);
     if (accountCount > 2) drawScrollHints();
   }
-  if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(2 * COL_W, 0); }
-  else             drawLinkStrip(tft, 2 * COL_W);
+  if (haveLinkSpr) { drawLinkStrip(linkSpr, 0); linkSpr.pushSprite(BOARD_W, 0); }
+  else             drawLinkStrip(tft, BOARD_W);
   if (!HAS_INPUT && webHotspotUp() && accountCount) drawSetupFooter();
   if (overlay == OV_PIN) drawPinOverlay();
   uiDrawStatus();

@@ -91,8 +91,14 @@ static int chooseN(const char *const *labels, int n) {
       continue;
     }
     if (e.kind != IN_TAP || e.y < y - 8 || e.y > y + h + 8) continue;
-    for (int i = 0; i < n; i++)
-      if (e.x >= 12 + i * (w + gap) - gap / 2 && e.x < 12 + (i + 1) * (w + gap) - gap / 2) return i;
+    // Nearest button rather than a strict range: a touchscreen reading a
+    // little short at the edges must not leave the last button unreachable.
+    int best = 0, bestD = SCR_W;
+    for (int i = 0; i < n; i++) {
+      int d = abs(e.x - (12 + i * (w + gap) + w / 2));
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 }
 

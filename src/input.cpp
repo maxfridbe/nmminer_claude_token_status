@@ -1,4 +1,5 @@
 #include "input.h"
+#include "settings.h"
 
 #define LONG_PRESS_MS 1500   // hold this long for the menu
 #define RELEASE_READS 3      // idle samples before a press counts as over
@@ -64,12 +65,27 @@ void inputBegin() {
 }
 
 // The IRQ line only drops under real pressure, so it gates every read.
+// Rotating the screen does not rotate the panel, so standing the board on end
+// swaps the axes here: the raw reading still runs along the panel's own sides.
 bool touchRead(int &x, int &y) {
   if (digitalRead(XPT2046_IRQ) == HIGH || !ts.touched()) return false;
   TS_Point p = ts.getPoint();
   if (p.z < Z_MIN) return false;
-  x = constrain(map(p.x, TS_MINX, TS_MAXX, 0, SCR_W), 0, SCR_W - 1);
-  y = constrain(map(p.y, TS_MINY, TS_MAXY, 0, SCR_H), 0, SCR_H - 1);
+  if (CAN_ROTATE && cfg.portrait) {
+    // Rotation 1 reads the panel's long side as x. Turning the screen to
+    // rotation 0 puts the panel's short side across the top, running the
+    // other way, so x comes from an inverted p.y and y straight from p.x.
+    x = constrain(map(p.y, TS_MAXY, TS_MINY, 0, SCR_W), 0, SCR_W - 1);
+    y = constrain(map(p.x, TS_MINX, TS_MAXX, 0, SCR_H), 0, SCR_H - 1);
+  } else {
+    x = constrain(map(p.x, TS_MINX, TS_MAXX, 0, SCR_W), 0, SCR_W - 1);
+    y = constrain(map(p.y, TS_MINY, TS_MAXY, 0, SCR_H), 0, SCR_H - 1);
+  }
+#ifdef TOUCH_TRACE
+  Serial.printf("[touch] raw %4d,%4d z=%3d -> %3d,%3d  (flipped %3d,%3d)\n", p.x, p.y, p.z, x, y,
+                constrain(map(p.y, TS_MINY, TS_MAXY, 0, SCR_W), 0, SCR_W - 1),
+                constrain(map(p.x, TS_MAXX, TS_MINX, 0, SCR_H), 0, SCR_H - 1));
+#endif
   return true;
 }
 

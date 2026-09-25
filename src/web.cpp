@@ -112,6 +112,8 @@ static int handleState(const Ctx &c, JsonDocument &, JsonDocument &d) {
   d["refreshMinutes"] = cfg.refreshMinutes;
   d["brightness"]     = cfg.brightness;
   d["lightMode"]      = cfg.lightMode;
+  d["portrait"]       = cfg.portrait;
+  d["canRotate"]      = (bool)CAN_ROTATE;
   d["sleepMinutes"]   = cfg.sleepMinutes;
   d["dimMinutes"]     = cfg.dimMinutes;
   d["maxAccounts"] = MAX_ACCOUNTS;
@@ -253,7 +255,21 @@ static int handleSettings(const Ctx &, JsonDocument &in, JsonDocument &out) {
     uiApplyTheme();
     uiDrawAll();
   }
+  // The screen's size is fixed at boot, so turning the board on end restarts
+  // it. The touch calibration goes with it: those corners were another
+  // rotation's.
+  bool rotated = false;
+  if (CAN_ROTATE && in["portrait"].is<bool>() && in["portrait"].as<bool>() != cfg.portrait) {
+    cfg.portrait = in["portrait"];
+    rotated = true;
+  }
   settingsSave();
+  if (rotated) {
+#if TOUCH_VIA_TFT
+    settingsForgetTouchCal();
+#endif
+    scheduleReboot();
+  }
   return okReply(out);
 }
 

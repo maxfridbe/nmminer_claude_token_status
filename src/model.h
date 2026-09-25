@@ -85,7 +85,8 @@ enum MenuAction { MA_NONE = -1, MA_PHONE, MA_WIFI_SCREEN, MA_WIFI_PHONE, MA_UPDA
                   MA_WIPE, MA_RESTART, MA_CLOSE,
                   MA_BRIGHT_DOWN, MA_BRIGHT_UP,   // touchscreens: the - and + buttons
                   MA_BRIGHT,                      // one-button boards: step through levels
-                  MA_THEME };                     // light / dark
+                  MA_THEME,                       // light / dark
+                  MA_ROTATE };                    // landscape / portrait
 MenuAction uiMenuHit(int x, int y);   // touchscreens: entry at a point, or MA_NONE
 void       uiMenuNext();              // one-button boards: move the highlight
 MenuAction uiMenuSelected();          // one-button boards: the highlighted entry

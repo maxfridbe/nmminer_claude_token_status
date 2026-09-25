@@ -33,6 +33,23 @@
 
 TFT_eSPI tft = TFT_eSPI();
 
+// The screen's size, as opposed to the panel's: standing the board on end
+// swaps them. board.h declares these; every layout reads them through
+// SCR_W/SCR_H, so nothing else needs to know which way up it is.
+uint16_t scrW = PANEL_W, scrH = PANEL_H;
+
+static void applyOrientation() {
+#ifdef FORCE_PORTRAIT     // demo and bring-up builds, which have no saved setting
+  cfg.portrait = FORCE_PORTRAIT;
+#endif
+  const bool portrait = CAN_ROTATE && cfg.portrait;
+  scrW = portrait ? PANEL_H : PANEL_W;
+  scrH = portrait ? PANEL_W : PANEL_H;
+  tft.setRotation(portrait ? PORTRAIT_ROTATION : TFT_ROTATION);
+  Serial.printf("[ui] %s, %ux%u\n", portrait ? "portrait" : "landscape",
+                (unsigned)scrW, (unsigned)scrH);
+}
+
 Account   accounts[MAX_ACCOUNTS];
 int       accountCount  = 0;
 NetStatus netStatus     = NET_IDLE;
@@ -224,6 +241,18 @@ static void menuAction(MenuAction act) {
       brightSaveAt = millis() + 3000;
       uiDrawAll();                            // the menu, repainted in the new colors
       return;
+#if CAN_ROTATE
+    case MA_ROTATE:       // stand it on end, or lay it flat again
+      cfg.portrait = !cfg.portrait;
+      settingsSave();
+#if TOUCH_VIA_TFT
+      settingsForgetTouchCal();   // the corners move with the rotation
+#endif
+      uiSplash(cfg.portrait ? "Standing on end..." : "Laying flat...");
+      delay(700);
+      ESP.restart();              // the screen's size is fixed at boot
+      break;
+#endif
     case MA_BRIGHT: {     // one button: the next step up, wrapping to the dimmest
       static const uint8_t STEPS[] = {10, 25, 50, 75, 100};
       int next = STEPS[0];
@@ -370,7 +399,12 @@ void setup() {
     delay(20);
   }
   tft.init();
-  tft.setRotation(TFT_ROTATION);
+  // Which way up the board stands decides the screen's size, and the sprites
+  // uiInit() allocates are sized from it, so the setting is read first.
+#ifndef DEMO_DATA
+  settingsLoad();
+#endif
+  applyOrientation();
   tft.fillScreen(TFT_BLACK);
 
   // tft.init() drives the backlight as a plain GPIO; hand it to LEDC for dimming.
@@ -379,7 +413,9 @@ void setup() {
   blWrite(0);
 
   inputBegin();
+#if !HAS_TOUCHSCREEN
   inputSetHoldIndicator(uiHoldProgress);   // fill the item while the button is held
+#endif
 
   uiInit();
 #ifdef DEMO_DATA
@@ -391,7 +427,6 @@ void setup() {
   runCheck();
 #else
   uiSplash("Starting...");
-  settingsLoad();
   uiApplyTheme();
   if (cfg.lightMode) uiSplash("Starting...");
   rampBacklight(onLevel(), 400);

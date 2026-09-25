@@ -25,6 +25,7 @@ static void loadNvs() {
   getStr("rscope", cfg.refreshScope, sizeof(cfg.refreshScope), "user:profile");
   cfg.hosting     = prefs.getBool("hosting", false);
   cfg.lightMode   = prefs.getBool("light", false);
+  cfg.portrait    = prefs.getBool("portrait", false);
   getStr("relay", cfg.relay, sizeof(cfg.relay));
   cfg.pageSeconds    = prefs.getUShort("pagesec", 12);
   cfg.refreshMinutes = prefs.getUShort("refmin", 15);
@@ -57,6 +58,13 @@ void settingsSaveTouchCal() {
                 cfg.touchCal[2], cfg.touchCal[3], cfg.touchCal[4]);
 }
 
+// Touch coordinates are mapped for one rotation, so turning the board on end
+// invalidates them and the next boot asks for the corners again.
+void settingsForgetTouchCal() {
+  prefs.remove("tcal");
+  cfg.touchCalOk = false;
+}
+
 void settingsSaveTokens(int i) {
   AccountCfg &a = cfg.acct[i];
   prefs.putString(key("at", i).c_str(), a.access);
@@ -73,6 +81,7 @@ void settingsSave() {
   prefs.putString("rscope", cfg.refreshScope);
   prefs.putBool("hosting", cfg.hosting);
   prefs.putBool("light", cfg.lightMode);
+  prefs.putBool("portrait", cfg.portrait);
   prefs.putString("relay", cfg.relay);
   prefs.putUShort("pagesec", cfg.pageSeconds);
   prefs.putUShort("refmin", cfg.refreshMinutes);

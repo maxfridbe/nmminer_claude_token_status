@@ -2,6 +2,7 @@
 // with -D BOARD_CYD or -D BOARD_NMTV. Display pins live in platformio.ini
 // (TFT_eSPI reads them from there); everything else board-specific is here.
 #pragma once
+#include <stdint.h>
 
 #if defined(BOARD_NMTV)
 // NMMiner NM-TV 1.54": ESP32, 240x240 ST7789, one touch button on top.
@@ -11,8 +12,8 @@
 // says nothing about the power enable's polarity.
   #define BOARD_ID          "nmtv"
   #define BOARD_NAME        "NM-TV 1.54in"
-  #define SCR_W             240
-  #define SCR_H             240
+  #define PANEL_W             240
+  #define PANEL_H             240
   #define TFT_ROTATION      0
   #define HAS_TOUCHSCREEN   0
   #define BL_ACTIVE_LOW     1
@@ -36,8 +37,8 @@
 // DC 2, reset tied to EN, backlight 27 (high = on), touch CS 33.
   #define BOARD_ID          "e32r40t"
   #define BOARD_NAME        "E32R40T 4.0in"
-  #define SCR_W             480
-  #define SCR_H             320
+  #define PANEL_W             480
+  #define PANEL_H             320
   #define TFT_ROTATION      1
   #define HAS_TOUCHSCREEN   1
   #define TOUCH_VIA_TFT     1
@@ -53,8 +54,8 @@
 // why touch reads came back empty until that was corrected.
   #define BOARD_ID          "crow28"
   #define BOARD_NAME        "CrowPanel 2.8in"
-  #define SCR_W             320
-  #define SCR_H             240
+  #define PANEL_W             320
+  #define PANEL_H             240
   #define TFT_ROTATION      1
   #define HAS_TOUCHSCREEN   1
   #define TOUCH_VIA_TFT     1        // shared SPI bus: tft.getTouch()
@@ -70,8 +71,8 @@
   #endif
   #define BOARD_ID          "cyd"
   #define BOARD_NAME        "CYD 2.8in"
-  #define SCR_W             320
-  #define SCR_H             240
+  #define PANEL_W             320
+  #define PANEL_H             240
   #define TFT_ROTATION      1
   #define HAS_TOUCHSCREEN   1
   #define BL_ACTIVE_LOW     0
@@ -91,7 +92,20 @@
 #define TOUCH_CAL_DEFAULT {0, 0, 0, 0, 0}
 #endif
 
-#define SQUARE_SCREEN (SCR_W == SCR_H)
+// The panel's size is fixed; the screen's is not. A board that is not square
+// can be stood on end, which swaps width for height, so every layout works
+// from scrW/scrH rather than from the panel's own dimensions. They change
+// only at boot, from the saved setting, and main.cpp owns them.
+extern uint16_t scrW, scrH;
+#define SCR_W scrW
+#define SCR_H scrH
+
+#define SQUARE_SCREEN (PANEL_W == PANEL_H)
+#define CAN_ROTATE    (!SQUARE_SCREEN)
+// Whether to use the larger fonts and spacing: a property of the panel, not
+// of which way up it is.
+#define BIG_PANEL     (PANEL_W >= 480)
+#define PORTRAIT_ROTATION ((TFT_ROTATION + 3) % 4)
 
 // Boards with neither a touchscreen nor a button are set up entirely from a
 // phone, so the hotspot has to offer itself rather than wait to be summoned.
