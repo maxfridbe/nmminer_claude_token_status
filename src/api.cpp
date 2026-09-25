@@ -57,6 +57,19 @@ void apiInit() {
 
 // ---------------------------------------------------------------- WiFi + clock
 
+static bool (*interrupt)() = nullptr;
+void apiSetInterrupt(bool (*fn)()) { interrupt = fn; }
+
+// delay(), but it lets go the moment the interrupt hook says so.
+static bool waitOrStop(uint32_t ms) {
+  uint32_t start = millis();
+  while (millis() - start < ms) {
+    if (interrupt && interrupt()) return true;
+    delay(10);
+  }
+  return false;
+}
+
 static bool wifiUp(String &err) {
   if (WiFi.status() == WL_CONNECTED) return true;
   WiFi.persistent(false);
@@ -70,9 +83,16 @@ static bool wifiUp(String &err) {
     WiFi.begin(cfg.ssid, cfg.pass);
 
     uint32_t start = millis();
+    bool stopped = false;
     while ((st = WiFi.status()) != WL_CONNECTED && millis() - start < WIFI_ATTEMPT_MS) {
       if (st == WL_NO_SSID_AVAIL && millis() - start > 6000) break;
-      delay(100);
+      if ((stopped = waitOrStop(100))) break;
+    }
+    if (stopped) {
+      Serial.println("[wifi] given up on: someone is holding the screen");
+      err = "Interrupted";
+      WiFi.disconnect(true);
+      return false;
     }
     if (st == WL_CONNECTED) {
       WiFi.setAutoReconnect(true);
@@ -86,7 +106,7 @@ static bool wifiUp(String &err) {
     }
     Serial.printf("[wifi] attempt %d/%d failed (status %d)\n", attempt, WIFI_ATTEMPTS, (int)st);
     WiFi.disconnect(true);
-    delay(400);
+    if (waitOrStop(400)) { err = "Interrupted"; return false; }
   }
 
   if (st == WL_NO_SSID_AVAIL)       err = String(cfg.ssid) + " not in range";
@@ -380,6 +400,7 @@ void apiCheckAll() {
 
   int good = 0;
   for (int i = 0; i < accountCount; i++) {
+    if (interrupt && interrupt()) break;      // a held screen wants the menu
     checkAccount(i);
     if (accounts[i].ok) good++;
   }

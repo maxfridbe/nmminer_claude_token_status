@@ -54,6 +54,10 @@ void apiCheckAll();
 void apiPollLink();   // refresh wifiLink.up / wifiLink.rssi without touching the API
 void   apiSyncAccounts();                                        // settings -> display model
 bool   apiWifiUp();                                              // join the configured WiFi
+// Called while a check blocks, every 10ms or so: return true to give up on it.
+// Without this a board looking for a network that isn't there reads nothing
+// anyone presses for the half minute it spends trying.
+void   apiSetInterrupt(bool (*fn)());
 String apiSigninStart(const char *alias, const char *models);   // returns the claude.ai link
 bool   apiSigninFinish(String pasted, String &err, String &email);
 bool   apiSigninPending(String &alias, String &url);

@@ -325,6 +325,24 @@ static void handleInput() {
 
 // ---------------------------------------------------------------- checks
 
+// A check blocks: up to half a minute of WiFi retries when the network is
+// gone, plus a TLS round trip per account. Input is polled all the way
+// through, so a hold still opens the menu - which is the one way back when
+// the saved network no longer exists.
+static bool menuWanted = false;
+static bool heldDuringCheck() {
+  InputEvent e = inputPoll();
+  if (e.kind == IN_HOLD || e.kind == IN_DOUBLE) { menuWanted = true; return true; }
+  return false;
+}
+static void takeMenuRequest() {
+  if (!menuWanted) return;
+  menuWanted = false;
+  Serial.println("[input] menu (held during a check)");
+  wake("hold");
+  uiShowMenu();
+}
+
 static void runCheck() {
   apiCheckAll();
 
@@ -453,10 +471,12 @@ void setup() {
   }
 
   apiInit();
-  uiSplash((String("Joining ") + cfg.ssid + "...").c_str());
+  apiSetInterrupt(heldDuringCheck);
+  uiSplash((String("Joining ") + cfg.ssid + "... hold for the menu").c_str());
   apiWifiUp();
   maybeStartWeb();
   runCheck();
+  takeMenuRequest();
 #ifdef OTA_SELFTEST
   updateSelfTest();
 #endif
@@ -499,9 +519,14 @@ void loop() {
     wake("setup page");
     apiSyncAccounts();
     runCheck();
+    takeMenuRequest();
     return;
   }
-  if ((int32_t)(now - nextCheckAt) >= 0) { runCheck(); return; }
+  if ((int32_t)(now - nextCheckAt) >= 0) {
+    // Not while the menu is open: a check would freeze it under your finger.
+    if (uiOverlay() == OV_MENU) nextCheckAt = now + 30000;
+    else { runCheck(); takeMenuRequest(); return; }
+  }
   updateScreen(now);
   handleInput();
   if (screen == SCREEN_OFF) { delay(20); return; }
