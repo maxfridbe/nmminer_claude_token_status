@@ -50,8 +50,27 @@ void apiSyncAccounts() {
   }
 }
 
+// Why the AP let go, which the Arduino status code cannot say: 15 is a failed
+// handshake (the password), 5 is "too many clients", 201 is nothing there,
+// 202 an auth refusal. Worth a line, since a board that will not join is
+// otherwise silent about the reason.
+static uint8_t lastDropReason = 0;
+
+static void onWifiDropped(WiFiEvent_t, WiFiEventInfo_t info) {
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  if (r != 8) lastDropReason = r;        // 8 is our own disconnect, not a refusal
+  const char *why = r == 15  ? " (handshake: wrong password)"
+                  : r == 5   ? " (the network is full)"
+                  : r == 201 ? " (not found)"
+                  : r == 202 ? " (auth refused)"
+                  : r == 204 ? " (handshake timed out)"
+                  : r == 4 || r == 2 ? " (timed out)" : "";
+  Serial.printf("[wifi] dropped by the AP, reason %u%s\n", (unsigned)r, why);
+}
+
 void apiInit() {
   strlcpy(wifiLink.ssid, cfg.ssid, sizeof(wifiLink.ssid));
+  WiFi.onEvent(onWifiDropped, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   apiSyncAccounts();
 }
 
@@ -75,6 +94,7 @@ static bool wifiUp(String &err) {
   WiFi.persistent(false);
   wl_status_t st = WL_IDLE_STATUS;
 
+  lastDropReason = 0;
   for (int attempt = 1; attempt <= WIFI_ATTEMPTS; attempt++) {
     // The hostname is applied when the STA interface starts, so set it while off.
     WiFi.mode(WIFI_OFF);
@@ -109,15 +129,24 @@ static bool wifiUp(String &err) {
     if (waitOrStop(400)) { err = "Interrupted"; return false; }
   }
 
-  if (st == WL_NO_SSID_AVAIL)       err = String(cfg.ssid) + " not in range";
-  else if (st == WL_CONNECT_FAILED) err = String("Wrong password for ") + cfg.ssid;
+  // The AP's reason says more than the status does: a passphrase that doesn't
+  // match times out the handshake rather than being refused outright, so
+  // "can't join" would be hiding the one thing worth saying.
+  if (lastDropReason == 15 || lastDropReason == 202 || st == WL_CONNECT_FAILED)
+    err = String("Wrong password for ") + cfg.ssid;
+  else if (lastDropReason == 5)     err = String(cfg.ssid) + " is full";
+  else if (st == WL_NO_SSID_AVAIL || lastDropReason == 201)
+    err = String(cfg.ssid) + " not in range";
   else                              err = String("Can't join ") + cfg.ssid;
+  Serial.printf("[wifi] giving up: %s\n", err.c_str());
   return false;
 }
 
-bool apiWifiUp() {
-  String err;
-  return wifiUp(err);
+bool apiWifiUp(String *err) {
+  String e;
+  bool ok = wifiUp(e);
+  if (err) *err = e;
+  return ok;
 }
 
 void apiPollLink() {

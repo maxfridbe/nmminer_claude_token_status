@@ -53,7 +53,7 @@ void apiInit();
 void apiCheckAll();
 void apiPollLink();   // refresh wifiLink.up / wifiLink.rssi without touching the API
 void   apiSyncAccounts();                                        // settings -> display model
-bool   apiWifiUp();                                              // join the configured WiFi
+bool   apiWifiUp(String *err = nullptr);                         // join the configured WiFi
 // Called while a check blocks, every 10ms or so: return true to give up on it.
 // Without this a board looking for a network that isn't there reads nothing
 // anyone presses for the half minute it spends trying.
@@ -68,7 +68,8 @@ void   uiApplyTheme();   // after cfg.lightMode changes
 void   uiSplash(const char* status);
 void   uiDrawAll();
 void   uiDrawStatus();
-void   uiSetupScreen(const char *apSsid, const char *apPass, const char *url);
+void   uiSetupScreen(const char *apSsid, const char *apPass, const char *url,
+                     const char *why = nullptr);   // why we are back here, if we are
 // Overlays sit on top of the dashboard and survive its redraws.
 enum OverlayKind { OV_NONE, OV_PIN, OV_HOTSPOT, OV_MENU, OV_REMOTE, OV_LAN };
 void   uiShowPin(const char *pin);

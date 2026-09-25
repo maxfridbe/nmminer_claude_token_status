@@ -195,7 +195,7 @@ static void menuAction(MenuAction act) {
       break;
     case MA_WIFI_SCREEN:  // WiFi on the touchscreen; accounts and logins untouched
       if (screenWifiSetup()) {
-        uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
+        uiSplash((String("Saved ") + cfg.ssid + ". Restarting to join...").c_str());
         delay(900);
         ESP.restart();
       }
@@ -473,7 +473,17 @@ void setup() {
   apiInit();
   apiSetInterrupt(heldDuringCheck);
   uiSplash((String("Joining ") + cfg.ssid + "... hold for the menu").c_str());
-  apiWifiUp();
+  // A board with no accounts that can't join has nothing to show and no way
+  // in, so it goes back to asking. One that has accounts keeps its screen and
+  // retries in the background: a network blip shouldn't wipe the dashboard.
+  String wifiErr;
+  if (!apiWifiUp(&wifiErr) && accountCount == 0 && !menuWanted) {
+    Serial.printf("[boot] can't join '%s' and nothing to show: setup mode\n", cfg.ssid);
+    webStartSetupAP();
+    uiSetupScreen(webApSsid(), webApPass(), webUrl().c_str(), wifiErr.c_str());
+    setupMode = true;
+    return;
+  }
   maybeStartWeb();
   runCheck();
   takeMenuRequest();
@@ -492,7 +502,7 @@ static void setupModeTouch() {
   Serial.printf("[input] setup screen %s at %d,%d\n", e.kind == IN_TAP ? "tap" : "event", e.x, e.y);
   if (e.kind != IN_TAP || !uiSetupButtonHit(e.x, e.y)) return;
   if (screenWifiSetup()) {
-    uiSplash((String("Joined ") + cfg.ssid + ". Restarting...").c_str());
+    uiSplash((String("Saved ") + cfg.ssid + ". Restarting to join...").c_str());
     delay(900);
     ESP.restart();
   }

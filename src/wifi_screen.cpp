@@ -272,43 +272,6 @@ static int pickNetwork(Net *nets, int n) {
 
 // ---------------------------------------------------------------- join
 
-static bool tryJoin(const char *ssid, const char *pass) {
-  header("Joining", ssid);
-  tft.setTextFont(2);
-  tft.setTextColor(cDim);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("Connecting...", SCR_W / 2, SCR_H / 2);
-
-  bool ap = WiFi.getMode() & WIFI_MODE_AP;
-  WiFi.disconnect(false);
-  WiFi.mode(ap ? WIFI_AP_STA : WIFI_STA);
-  WiFi.begin(ssid, pass);
-  uint32_t start = millis();
-  wl_status_t st;
-  while ((st = WiFi.status()) != WL_CONNECTED && millis() - start < 20000) {
-    if (st == WL_CONNECT_FAILED && millis() - start > 4000) break;
-    delay(100);
-  }
-  return st == WL_CONNECTED;
-}
-
-static bool message(const char *title, const char *line, const char *ok, const char *cancel) {
-  header(title);
-  tft.setTextFont(2);
-  tft.setTextColor(cText);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString(line, SCR_W / 2, SCR_H * 100 / 240);
-  const int by = SCR_H * 150 / 240, bw = SX(110), bh = BIG ? 52 : 40;
-  button(SX(40), by, bw, bh, ok, cAccent, cBg);
-  if (cancel) button(SX(170), by, bw, bh, cancel, cKeyHi, cText);
-  for (;;) {
-    int x, y;
-    touchWaitTap(x, y);
-    if (inBox(x, y, SX(40), by, bw, bh)) return true;
-    if (cancel && inBox(x, y, SX(170), by, bw, bh)) return false;
-  }
-}
-
 bool screenWifiSetup() {
   cBg = themed(0x000000, 0xF4F3EE); cKey = themed(0x1C1C22, 0xE3E1DA); cKeyHi = themed(0x2A2A33, 0xD4D2CA);
   cText = themed(0xF4F4F7, 0x141414); cDim = themed(0x8A8A96, 0x6E6E78);
@@ -330,20 +293,23 @@ bool screenWifiSetup() {
     } else {
       ssid = nets[pick].ssid;
       open = nets[pick].open;
+      Serial.printf("[wifi] picked '%s' from the scan, rssi %d, %s\n", nets[pick].ssid,
+                    nets[pick].rssi, nets[pick].open ? "open" : "needs a password");
     }
 
-    for (;;) {
-      if (!open && !keyboard("Password", ssid.c_str(), pass, true)) break;
-      if (tryJoin(ssid.c_str(), pass.c_str())) {
-        strlcpy(cfg.ssid, ssid.c_str(), sizeof(cfg.ssid));
-        strlcpy(cfg.pass, pass.c_str(), sizeof(cfg.pass));
-        settingsSave();
-        Serial.printf("[wifi] joined '%s' from the touchscreen, saved\n", cfg.ssid);
-        return true;
-      }
-      Serial.printf("[wifi] touchscreen join of '%s' failed\n", ssid.c_str());
-      if (open || !message("Couldn't join", "Check the password and try again.", "Try again", "Back")) break;
-    }
+    // The network is saved, not joined here. In setup mode the radio is
+    // already running a hotspot, a captive DNS and a web server, and tearing
+    // that down to join left the driver unable to bring the station netif
+    // back up ("netstack cb reg failed"): it would never associate, whatever
+    // the password. The caller restarts, and the boot path joins on a clean
+    // radio, which is the path that works. A wrong password now shows up at
+    // boot, which drops back to this screen.
+    if (!open && !keyboard("Password", ssid.c_str(), pass, true)) continue;
+    strlcpy(cfg.ssid, ssid.c_str(), sizeof(cfg.ssid));
+    strlcpy(cfg.pass, pass.c_str(), sizeof(cfg.pass));
+    settingsSave();
+    Serial.printf("[wifi] saved '%s' from the touchscreen, restarting to join\n", cfg.ssid);
+    return true;
   }
 
   // Cancelled: back to the network we had.

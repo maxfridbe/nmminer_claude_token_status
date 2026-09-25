@@ -313,9 +313,22 @@ so changing it restarts the board. On a board with a calibrated touchscreen the
 calibration is dropped at the same time: those corners belonged to the old
 rotation, so the next boot asks for them again.
 
-Changing WiFi never touches accounts or logins. A new network is tested before
-it's saved, and cancelling keeps the old one. If the old network is gone and
-the board can't show its menu over it, hold the screen while powering on.
+Changing WiFi never touches accounts or logins. The network is saved and the
+board restarts to join it: the radio is already running a hotspot, a captive
+portal and a web server while you are typing, and joining from there leaves
+the driver unable to bring the station side back up. Joining at boot, on a
+clean radio, is the path that works.
+
+If the password is wrong you find out at the next boot, where the board says
+which one it is: **Wrong password for <network>**, **<network> not in range**,
+or **<network> is full** - read from the reason the access point gives, which
+says more than "couldn't join". A board with no accounts that can't join goes
+back to the setup screen rather than retrying at a screen you can't reach.
+
+Holding the screen interrupts whatever the board is doing, including a WiFi
+attempt. That matters when the saved network no longer exists: the attempts
+take half a minute, and without this the menu was unreachable for all of it.
+Holding the screen while powering on still forces setup mode.
 
 ## Build from source
 
@@ -486,6 +499,7 @@ deploy, run `tools/scope_test.py <alias>`.
 | `src/main.cpp` | boot modes, check scheduler, brightness, dimming and sleep, touch, menu |
 | `src/settings.cpp` | settings and logins in the board's flash; applies a script config |
 | `src/web.cpp` | setup hotspot, captive portal, setup page API, PIN |
+| `src/probe/nvs_recover.cpp` | `pio run -e recover`: puts back an account list lost while the logins survived in NVS, and restores the network with `-DRECOVER_SSID`/`-DRECOVER_PASS`. Prints tokens masked |
 | `src/web_page.h` | the setup page itself |
 | `src/relay.cpp` | remote setup: MQTT over TLS, AES-GCM, replay protection |
 | `web/relay.js` | the page's side of the relay: MQTT over WebSocket, WebCrypto |

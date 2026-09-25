@@ -873,9 +873,16 @@ int uiChoose(const char *title, const char *const *labels, const char *const *su
 #define SETUP_BTN_W (SCR_W - J_X - 10)
 #define SETUP_BTN_H (BIG_SCREEN ? 50 : 36)
 
-void uiSetupScreen(const char *apSsid, const char *apPass, const char *url) {
+void uiSetupScreen(const char *apSsid, const char *apPass, const char *url, const char *why) {
   drawJoin("WiFi setup", apSsid, apPass, url, "Pick WiFi",
-           NARROW ? "Power-cycle to cancel" : "Accounts and logins are kept. Power-cycle to cancel.");
+           why ? ""                // the reason goes in its place, in warning colours
+               : NARROW ? "Power-cycle to cancel" : "Accounts and logins are kept. Power-cycle to cancel.");
+  if (why) {
+    tft.setTextFont(BIG_SCREEN ? 2 : 1);
+    tft.setTextColor(C_WARN);
+    tft.setTextDatum(BL_DATUM);
+    tft.drawString(fit(tft, why, SCR_W - 16), NARROW ? 6 : J_QR_X, SCR_H - 6);
+  }
   if (!HAS_TOUCHSCREEN) return;
   // Or skip the phone: type the WiFi password on this screen.
   tft.fillSmoothRoundRect(SETUP_BTN_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, 9, C_MARK, C_BG);
