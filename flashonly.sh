@@ -7,9 +7,11 @@
 #   ./flashonly.sh --board nmtv  skip the board question (cyd, crow28, e32r40t or nmtv)
 #   ./flashonly.sh --local     flash the image from tools/make_release.sh
 #   ./flashonly.sh --erase     wipe the board first (its WiFi, accounts and logins)
+#   ./flashonly.sh --download  fetch and check the latest release, don't flash
 #   PORT=/dev/ttyUSB0 ./flashonly.sh --yes     no questions (not with --erase)
 #
 # A board that was already set up keeps its WiFi, accounts and logins.
+# To flash a pile of boards one after another, use flashloop.sh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -22,15 +24,16 @@ warn() { printf '\033[33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 ask()  { local a; read -r -p "$1" a </dev/tty; printf '%s' "$a"; }
 
-LOCAL=0; ERASE=0; YES=0; BOARD="${BOARD:-}"
+LOCAL=0; ERASE=0; YES=0; DOWNLOAD=0; BOARD="${BOARD:-}"
 while [[ $# -gt 0 ]]; do
   arg="$1"; shift
   case "$arg" in
     --board)   BOARD="${1:-}"; shift ;;
     --local)   LOCAL=1 ;;
     --erase)   ERASE=1 ;;
+    --download) DOWNLOAD=1 ;;
     --yes|-y)  YES=1 ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         die "unknown option: $arg (try --help)" ;;
   esac
 done
@@ -81,6 +84,7 @@ else
   mv "$IMG.part" "$IMG"; mv "$IMG.sha256.part" "$IMG.sha256"
   log "Checksum OK"
 fi
+[[ $DOWNLOAD -eq 1 ]] && { log "Saved $IMG"; exit 0; }
 
 # --- pick the board
 describe() {       # /dev/ttyUSB0 -> "1a86:7523 QinHeng USB Serial"

@@ -147,6 +147,10 @@ flashes it. `--board cyd` or `--board nmtv` skips the question. A board that was
 already set up keeps its WiFi, accounts and logins. If `flashonly.sh` can't
 open the port: `sudo usermod -aG dialout $USER`, then log out and back in.
 
+Flashing several boards? `./flashloop.sh` asks for the firmware once, downloads
+it once, then flashes each board as you plug it in: unplug it, plug in the
+next, Ctrl-C when you're done. `--board crow28` skips the question.
+
 Then finish on the board, as described next. Prefer esptool directly? On a
 *fresh* board, `esptool --chip esp32 write-flash 0x0 claude-status-cyd.bin` (or
 `-nmtv`) with the image from the [releases page](../../releases). Don't do that on a board
@@ -487,6 +491,7 @@ deploy, run `tools/scope_test.py <alias>`.
 | Path | Purpose |
 |---|---|
 | `flashonly.sh` | pick a USB device, flash the latest release (keeps the board's settings) |
+| `flashloop.sh` | flash a pile of boards one after another, as you plug each one in |
 | `deploy_and_build.sh` | build from source and flash, from a config file or generic |
 | `tools/make_release.sh` | builds each board's generic images into `firmware/` |
 | `src/board.h` | per-board screen, backlight and input settings |
