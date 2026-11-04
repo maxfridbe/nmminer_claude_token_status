@@ -8,6 +8,8 @@ Claude accounts, checking every 15 minutes.
 Set it up on the touchscreen and your phone (join its hotspot, sign in to
 Claude in the browser), or from a Linux machine with a config file and a script.
 
+☕ [Buy me a cup of tokens](https://buymeacoffee.com/maxfridbe)
+
 ![claude-status running on a Cheap Yellow Display](screenshots/claude-monitor.jpg)
 
 - **Ring**: the 5-hour session window, % used, with time until reset.
